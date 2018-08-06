@@ -5,6 +5,7 @@
 #include "socketchat.h"
 #include "wsocket.h"
 #include "InputLine.h"
+#include "RedisProxy.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,22 +13,27 @@
 #include <string>
 #include <vector>
 
-//#define PORT_NUMBER 6379    // Redis port number
-#define PORT_NUMBER 3009    // test port number
+#define PORT_NUMBER 6379    // Redis port number
+//#define PORT_NUMBER 3009    // test port number
 
 using socketchat::SocketChat;
 
-class ClientConnection : public socketchat::SocketChatCallback
+class ClientConnection : public socketchat::SocketChatCallback, public redisproxy::RedisProxy::Callback
 {
 public:
 	ClientConnection(wsocket::Wsocket *client,uint32_t id) : mId(id)
 	{
 		mClient = socketchat::SocketChat::create(client);
+        mRedisProxy = redisproxy::RedisProxy::create();
 	}
 
 	virtual ~ClientConnection(void)
 	{
 		delete mClient;
+        if (mRedisProxy)
+        {
+            mRedisProxy->release();
+        }
 	}
 
 	uint32_t getId(void) const
@@ -35,21 +41,18 @@ public:
 		return mId;
 	}
 
-	const char * getMessage(void)
-	{
-		const char *ret = nullptr;
+    virtual void receiveRedisMessage(const char *msg) override final
+    {
+        mClient->sendText(msg);
+    }
 
-		mHaveMessage = false;
+    void pump(void)
+	{
 		if (mClient)
 		{
+            mRedisProxy->getToClient(this);
 			mClient->poll(this, 1);
-			if (mHaveMessage)
-			{
-				ret = mMessage.c_str();
-			}
 		}
-
-		return ret;
 	}
 
 	void sendText(const char *str)
@@ -62,8 +65,7 @@ public:
 
 	virtual void receiveMessage(const char *message) override final
 	{
-		mHaveMessage = true;
-        mMessage = std::string(message);
+        mRedisProxy->fromClient(message);
 	}
 
 	bool isConnected(void)
@@ -78,10 +80,9 @@ public:
 		return ret;
 	}
 
-	bool					mHaveMessage{ false };
-	std::string				mMessage;
 	socketchat::SocketChat	*mClient{ nullptr };
 	uint32_t				mId{ 0 };
+    redisproxy::RedisProxy  *mRedisProxy{ nullptr };
 };
 
 typedef std::vector< ClientConnection * > ClientConnectionVector;
@@ -142,13 +143,6 @@ public:
 					{
 						exit = true;
 					}
-					else
-					{
-						for (auto &i : mClients)
-						{
-							i->sendText(str);
-						}
-					}
 				}
 			}
 
@@ -177,15 +171,7 @@ public:
 			// all currently connected clients
 			for (auto &i : mClients)
 			{
-				const char *newMessage = i->getMessage();
-				if (newMessage)
-				{
-					printf("Client[%d] : %s\r\n", i->getId(), newMessage);
-					for (auto &j : mClients)
-					{
-						j->sendText(newMessage);
-					}
-				}
+                i->pump();
 			}
 		}
 	}

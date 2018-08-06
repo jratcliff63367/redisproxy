@@ -9,8 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-//#define PORT_NUMBER 6379    // Redis port number
-#define PORT_NUMBER 3009    // test port number
+#define PORT_NUMBER 6379    // Redis port number
 
 class ReceiveData : public socketchat::SocketChatCallback
 {
@@ -28,11 +27,6 @@ int main(int argc,const char **argv)
 	if (argc == 2)
 	{
 		host = argv[1];
-        if (strcmp(host, "redis") == 0)
-        {
-            host = "localhost";
-            portNumber = 6379;
-        }
 	}
 	{
 		socketchat::socketStartup();

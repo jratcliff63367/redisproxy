@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.1)
 
-project(socketchat)
+project(redisproxy)
 
 #
 # common directories
@@ -97,6 +97,8 @@ endif()
 
 set(TestServer_SOURCES
 	app/TestServer/TestServer.cpp
+	app/TestServer/
+	app/TestServer/RedisProxy.cpp
 )
 
 
