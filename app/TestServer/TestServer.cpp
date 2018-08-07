@@ -6,6 +6,8 @@
 #include "wsocket.h"
 #include "InputLine.h"
 #include "RedisProxy.h"
+#include "KeyValueDatabase.h"
+
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -21,10 +23,10 @@ using socketchat::SocketChat;
 class ClientConnection : public socketchat::SocketChatCallback, public redisproxy::RedisProxy::Callback
 {
 public:
-	ClientConnection(wsocket::Wsocket *client,uint32_t id) : mId(id)
+	ClientConnection(wsocket::Wsocket *client,uint32_t id,keyvaluedatabase::KeyValueDatabase *dataBase) : mId(id), mDatabase(dataBase)
 	{
 		mClient = socketchat::SocketChat::create(client);
-        mRedisProxy = redisproxy::RedisProxy::create();
+        mRedisProxy = redisproxy::RedisProxy::create(mDatabase);
 	}
 
 	virtual ~ClientConnection(void)
@@ -43,6 +45,7 @@ public:
 
     virtual void receiveRedisMessage(const char *msg) override final
     {
+        printf("Sending: %s\r\n", msg);
         mClient->sendText(msg);
     }
 
@@ -80,9 +83,10 @@ public:
 		return ret;
 	}
 
-	socketchat::SocketChat	*mClient{ nullptr };
-	uint32_t				mId{ 0 };
-    redisproxy::RedisProxy  *mRedisProxy{ nullptr };
+	socketchat::SocketChat	            *mClient{ nullptr };
+	uint32_t				            mId{ 0 };
+    redisproxy::RedisProxy              *mRedisProxy{ nullptr };
+    keyvaluedatabase::KeyValueDatabase  *mDatabase{ nullptr };
 };
 
 typedef std::vector< ClientConnection * > ClientConnectionVector;
@@ -94,6 +98,8 @@ public:
 	{
 		mServerSocket = wsocket::Wsocket::create(SOCKET_SERVER, PORT_NUMBER);
 		mInputLine = inputline::InputLine::create();
+        mDatabase = keyvaluedatabase::KeyValueDatabase::create();
+
 		printf("Simple Websockets chat server started.\r\n");
 		printf("Type 'bye', 'quit', or 'exit' to stop the server.\r\n");
 		printf("Type anything else to send as a broadcast message to all current client connections.\r\n");
@@ -113,6 +119,10 @@ public:
 		{
 			mServerSocket->release();
 		}
+        if (mDatabase)
+        {
+            mDatabase->release();
+        }
 	}
 
 	void run(void)
@@ -127,7 +137,7 @@ public:
 				if (clientSocket)
 				{
 					uint32_t index = uint32_t(mClients.size()) + 1;
-					ClientConnection *cc = new ClientConnection(clientSocket, index);
+					ClientConnection *cc = new ClientConnection(clientSocket, index,mDatabase);
 					printf("New client connection (%d) established.\r\n", index);
 					mClients.push_back(cc);
 				}
@@ -179,6 +189,7 @@ public:
 	wsocket::Wsocket		*mServerSocket{ nullptr };
 	inputline::InputLine	*mInputLine{ nullptr };
 	ClientConnectionVector	mClients;
+    keyvaluedatabase::KeyValueDatabase  *mDatabase{ nullptr };
 };
 
 

@@ -6,3 +6,5 @@
 /*.bak
 /include/*.bak
 /ext/easywsclient/*.bak
+/app/TestServer/*.bak
+/src/*.bak

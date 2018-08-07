@@ -4,6 +4,12 @@
 // It doesn't really, except in the simplest terms.
 // This is entirely educational.
 
+// Forward reference the keyvalue database
+namespace keyvaluedatabase
+{
+    class KeyValueDatabase;
+}
+
 namespace redisproxy
 {
 
@@ -15,7 +21,8 @@ public:
     public:
         virtual void receiveRedisMessage(const char *msg) = 0;
     };
-	static RedisProxy *create(void);
+    // Provides the *shared* keyvalue database that all connections talk to
+	static RedisProxy *create(keyvaluedatabase::KeyValueDatabase *database);
 
 	virtual bool fromClient(const char *message) = 0;
 

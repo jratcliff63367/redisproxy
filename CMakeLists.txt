@@ -83,7 +83,11 @@ file (GLOB_RECURSE socketchat_EXTERNAL_SOURCES
 
 set(Shared_SOURCES
 	include/InputLine.h
+	include/KeyValueDatabase.h
+	include/RedisCommandStream.h
 	src/InputLine.cpp
+	src/KeyValueDatabase.cpp
+	src/RedisCommandStream.cpp
 )
 
 
