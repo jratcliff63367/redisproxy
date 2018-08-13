@@ -18,9 +18,20 @@ public:
     virtual void releaseGetMem(void *mem) = 0;
 
     virtual bool exists(const char *key) = 0;
+    virtual bool isList(const char *key) = 0;
     virtual void set(const char *key, const void *data, uint32_t dataLen) = 0;
+
+    // append to an existing or new record; returns size of the list or -1 if unable to do a push
+    virtual int32_t push(const char *key, const void *data, uint32_t dataLen) = 0;
+
     virtual int32_t increment(const char *key,int32_t value) = 0;
     virtual bool isInteger(const char *key) = 0;
+
+    // not use fully implemented
+    virtual void watch(const char *key) = 0;
+
+    virtual void unwatch(const char *key) = 0;
+
 	virtual void release(void) = 0;
 
 protected:

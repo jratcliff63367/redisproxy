@@ -6,31 +6,43 @@
 #include <string.h>
 #include <unordered_map>
 
+#ifdef _MSC_VER
+#pragma warning(disable:4100)
+#endif
+
 namespace keyvaluedatabase
 {
+
+    class DataBlock
+    {
+    public:
+        DataBlock * mNext{ nullptr };
+        uint32_t    mDataLen{ 0 };
+        void        *mData{ nullptr };
+    };
+
 
     class Value
     {
     public:
-        Value(const void *data, uint32_t dlen)
+        Value(const void *data, uint32_t dlen,bool isList)
         {
-            mData = malloc(dlen);
-            mDataLen = dlen;
-            memcpy(mData, data, dlen);
+            mIsList = isList;
+            getDataBlock(data, dlen);
         }
 
         ~Value(void)
         {
-            delete mData;
+            releaseDataBlocks();
         }
 
         bool isInteger(void) const
         {
             bool ret = false;
 
-            if (mDataLen && mData)
+            if (mRoot)
             {
-                const char *cptr = (const char *)mData;
+                const char *cptr = (const char *)mRoot->mData;
                 char c = *cptr;
                 if ((c >= '0' && c <= '9') || c == '+' || c == '-')
                 {
@@ -44,11 +56,11 @@ namespace keyvaluedatabase
         {
             int32_t ret = 0;
 
-            if (mData && mDataLen < 511)
+            if (mRoot && mRoot->mDataLen < 511)
             {
                 char scratch[512];
-                memcpy(scratch, mData, mDataLen);
-                scratch[mDataLen] = 0;
+                memcpy(scratch, mRoot->mData, mRoot->mDataLen);
+                scratch[mRoot->mDataLen] = 0;
                 ret = atoi(scratch);
             }
 
@@ -57,14 +69,67 @@ namespace keyvaluedatabase
 
         void newData(const void *data, uint32_t dlen)
         {
-            free(mData);
-            mData = malloc(dlen);
-            memcpy(mData, data, dlen);
-            mDataLen = dlen;
+            releaseDataBlocks();
+            getDataBlock(data, dlen);
         }
 
-        uint32_t    mDataLen{ 0 };
-        void        *mData{ nullptr };
+        uint32_t push(const void *data, uint32_t dlen)
+        {
+            getDataBlock(data, dlen);
+            return mBlockCount;
+        }
+
+        void releaseDataBlocks(void)
+        {
+            DataBlock *db = mRoot;
+            while (db)
+            {
+                DataBlock *next = db->mNext;
+                free(db);
+                db = next;
+            }
+            mRoot = nullptr;
+            mBlockCount = 0;
+        }
+
+        DataBlock *getDataBlock(const void *data, uint32_t dataLen)
+        {
+            DataBlock *db = (DataBlock *)malloc(sizeof(DataBlock) + dataLen);
+            new (db) DataBlock;
+            db->mData = db + 1;
+            db->mDataLen = dataLen;
+            db->mNext = nullptr;
+            memcpy(db->mData, data, dataLen);
+            if (mRoot)
+            {
+                DataBlock *previous = mRoot;
+                while (previous && previous->mNext )
+                {
+                    previous = previous->mNext;
+                }
+                previous->mNext = db;
+            }
+            else
+            {
+                mRoot = db;
+            }
+            mBlockCount++;
+            return db;
+        }
+
+        bool isList(void) const
+        {
+            return mIsList;
+        }
+
+        uint32_t getBlockCount(void) const
+        {
+            return mBlockCount;
+        }
+
+        bool        mIsList{ false };
+        uint32_t    mBlockCount{ 0 };
+        DataBlock   *mRoot{ nullptr };
     };
 
     typedef std::unordered_map< std::string, Value * > KeyValueMap;
@@ -113,9 +178,12 @@ namespace keyvaluedatabase
             if (found != mDatabase.end())
             {
                 Value *v = found->second;
-                ret = malloc(v->mDataLen);
-                memcpy(ret, v->mData, v->mDataLen);
-                dataLen = v->mDataLen;
+                if (v->mRoot)
+                {
+                    ret = malloc(v->mRoot->mDataLen);
+                    memcpy(ret, v->mRoot->mData, v->mRoot->mDataLen);
+                    dataLen = v->mRoot->mDataLen;
+                }
             }
             unlock();
 
@@ -127,6 +195,32 @@ namespace keyvaluedatabase
             free(mem);
         }
 
+        // append to an existing or new record; returns length of the list
+        virtual int32_t push(const char *_key, const void *data, uint32_t dataLen) override final
+        {
+            int32_t ret = -1;
+            lock();
+            std::string key(_key);
+            const auto &found = mDatabase.find(key);
+            if (found == mDatabase.end())
+            {
+                Value *v = new Value(data, dataLen,true);
+                mDatabase[key] = v;
+                ret = 1;
+            }
+            else
+            {
+                Value *v = found->second;
+                if (v->mIsList)
+                {
+                    ret = v->push(data, dataLen);
+                    mDatabase[key] = v;
+                }
+            }
+            unlock();
+            return ret;
+        }
+
         virtual void set(const char *_key, const void *data, uint32_t dataLen) override final
         {
             lock();
@@ -134,15 +228,13 @@ namespace keyvaluedatabase
             const auto &found = mDatabase.find(key);
             if (found == mDatabase.end())
             {
-                Value *v = new Value(data, dataLen);
+                Value *v = new Value(data, dataLen,false);
                 mDatabase[key] = v;
             }
             else
             {
                 Value *v = found->second;
-                delete v;
-                v = new Value(data, dataLen);
-                mDatabase[key] = v;
+                v->newData(data, dataLen);
             }
             unlock();
         }
@@ -186,7 +278,7 @@ namespace keyvaluedatabase
             {
                 char scratch[512];
                 snprintf(scratch, 512, "%d", v);
-                Value *vstore = new Value(scratch, uint32_t(strlen(scratch)));
+                Value *vstore = new Value(scratch, uint32_t(strlen(scratch)),false);
                 mDatabase[std::string(key)] = vstore;
                 ret = v;
             }
@@ -205,6 +297,35 @@ namespace keyvaluedatabase
             unlock();
 
             return ret;
+        }
+
+        virtual bool isList(const char *key) override final
+        {
+            bool ret = false;
+
+            lock();
+
+            const auto &found = mDatabase.find(std::string(key));
+            if (found != mDatabase.end())
+            {
+                Value *v = found->second;
+                ret = v->mIsList;
+            }
+
+            unlock();
+
+            return ret;
+        }
+
+        // not use fully implemented
+        virtual void watch(const char *key) override final
+        {
+            // TODO
+        }
+
+        virtual void unwatch(const char *key) override final
+        {
+            // TODO
         }
 
         std::mutex      mMutex;
