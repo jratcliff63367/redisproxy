@@ -56,6 +56,18 @@ namespace redisproxy
                 rediscommandstream::RedisCommand command = mCommandStream->addStream(message, argc);
                 switch (command)
                 {
+                case rediscommandstream::RedisCommand::INCR:
+                    incrementBy(argc, 1, false);
+                    break;
+                case rediscommandstream::RedisCommand::DECR:
+                    incrementBy(argc, 1, true);
+                    break;
+                case rediscommandstream::RedisCommand::INCRBY:
+                    incrementBy(argc,false);
+                    break;
+                case rediscommandstream::RedisCommand::DECRBY:
+                    incrementBy(argc, true);
+                    break;
                 case rediscommandstream::RedisCommand::NONE:
                     break;
                 case rediscommandstream::RedisCommand::PING:
@@ -182,6 +194,79 @@ namespace redisproxy
             }
         }
 
+        bool isInteger(const char *str)
+        {
+            bool ret = false;
+            char c = *str;
+            if ((c >= '0' && c <= '9') || c == '+' || c == '-')
+            {
+                ret = true;
+            }
+            return ret;
+        }
+
+        void incrementBy(const char *key,int32_t dv,bool isNegative)
+        {
+            if (key)
+            {
+                if (mDatabase->isInteger(key))
+                {
+                    if (isNegative)
+                    {
+                        dv *= -1;
+                    }
+                    int32_t v = mDatabase->increment(key, dv);
+                    char scratch[512];
+                    snprintf(scratch, 512, ":%d", v);
+                    addResponse(scratch);
+                }
+                else
+                {
+                    addResponse("(error) ERR value is not an integer or out of range");
+                }
+            }
+        }
+
+        void incrementBy(uint32_t argc,int32_t dv,bool isNegative)
+        {
+            if (argc == 1)
+            {
+                rediscommandstream::RedisAttribute atr;
+                uint32_t dataLen;
+                const char *key = mCommandStream->getAttribute(0, atr, dataLen);
+                incrementBy(key, dv, isNegative);
+            }
+            else
+            {
+                badArgs(isNegative ? "decr" : "incr");
+            }
+        }
+
+
+        void incrementBy(uint32_t argc,bool isNegative)
+        {
+            if (argc == 2)
+            {
+                rediscommandstream::RedisAttribute atr;
+                uint32_t dataLen;
+                const char *key = mCommandStream->getAttribute(0, atr, dataLen);
+                const char *value = mCommandStream->getAttribute(1, atr, dataLen);
+                if (isInteger(value))
+                {
+                    int32_t dv = atoi(value);
+                    incrementBy(key, dv, isNegative);
+                }
+                else
+                {
+                    addResponse("(error) ERR value is not an integer or out of range");
+                }
+            }
+            else
+            {
+                badArgs(isNegative ? "decrby" : "incrby");
+            }
+        }
+
         void select(uint32_t argc)
         {
             if (argc == 1)
@@ -267,61 +352,6 @@ namespace redisproxy
             }
             mResponseBuffer->addBuffer(nullptr, slen + 1 + sizeof(uint32_t));
         }
-
-#if 0 // TODO TODO
-        virtual int32_t ParseLine(uint32_t lineno, uint32_t argc, const char **argv)  // return TRUE to continue parsing, return FALSE to abort parsing process
-        {
-            int32_t ret = 0;
-
-            if (argc)
-            {
-                const char *cmd = argv[0];
-                Keyword key = Keyword(mKeywordTable.string2Id(cmd));
-                switch (key)
-                {
-                case Keyword::SET:
-                    addResponse("+OK");
-                    break;
-                case Keyword::SELECT:
-                    addResponse("+OK");
-#if 0
-                    if (argc == 2)
-                    {
-                        addResponse("+OK");
-                    }
-                    else
-                    {
-                        addResponse("Received: -ERR wrong number of arguments for 'select' command");
-                    }
-#endif
-                    break;
-                case Keyword::PING:
-                    if (argc == 1)
-                    {
-                        addResponse("+PONG");
-                    }
-                    else if (argc == 2)
-                    {
-                        const char *response = argv[1];
-                        uint32_t slen = uint32_t(strlen(response));
-                        char scratch[512];
-                        snprintf(scratch, 512, "$%d", slen);
-                        addResponse(scratch);
-                        addResponse(response);
-                    }
-                    else
-                    {
-                        addResponse("-ERR wrong number of arguments for 'ping' command");
-                    }
-                    break;
-                }
-
-            }
-
-            return ret;
-        }
-#endif
-
 
         uint32_t                                mInstanceId{ 0 };
         simplebuffer::SimpleBuffer	            *mResponseBuffer{ nullptr };// Where pending responses are stored
