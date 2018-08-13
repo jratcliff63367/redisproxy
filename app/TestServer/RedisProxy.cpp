@@ -74,7 +74,7 @@ namespace redisproxy
                 const char *key = mCommandStream->getAttribute(0, atr, dataLen);
                 if (key )
                 {
-                    if (!mDatabase->exists(key) || mDatabase->isList(key))
+                    if (!mDatabase->exists(key,nullptr,nullptr) || mDatabase->isList(key))
                     {
                         const char *value = mCommandStream->getAttribute(1, atr, dataLen);
                         int32_t listCount = mDatabase->push(key, value, dataLen);
@@ -169,7 +169,7 @@ namespace redisproxy
                     const char *data = mCommandStream->getAttribute(1, atr, dataLen);
                     if (key && data && mDatabase)
                     {
-                        if (mDatabase->exists(key))
+                        if (mDatabase->exists(key,nullptr,nullptr))
                         {
                             addResponse(":0");
                         }
@@ -360,18 +360,13 @@ namespace redisproxy
                 rediscommandstream::RedisAttribute atr;
                 uint32_t dataLen;
                 const char *key = mCommandStream->getAttribute(0, atr, dataLen);
-                bool found = false;
                 if (key && mDatabase)
                 {
-                    found = mDatabase->exists(key);
-                }
-                if (found)
-                {
-                    addResponse(":1");
-                }
-                else
-                {
-                    addResponse(":0");
+                    mDatabase->exists(key, this, [](bool found, void* userPtr)
+                    {
+                        RedisProxyImpl *o = (RedisProxyImpl *)userPtr;
+                        o->addResponse(found ? ":1" : ":0");
+                   });
                 }
             }
         }
@@ -415,7 +410,7 @@ namespace redisproxy
         {
             if (key)
             {
-                if ( !mDatabase->exists(key) || mDatabase->isInteger(key))
+                if ( !mDatabase->exists(key,nullptr,nullptr) || mDatabase->isInteger(key))
                 {
                     if (isNegative)
                     {

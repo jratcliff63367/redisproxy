@@ -151,7 +151,7 @@ namespace keyvaluedatabase
             }
         }
 
-        virtual bool exists(const char *_key) override final
+        virtual bool exists(const char *_key,void *userPointer,KVD_existsCallback callback) override final
         {
             bool ret = false;
 
@@ -163,6 +163,10 @@ namespace keyvaluedatabase
                 ret = true;
             }
             unlock();
+            if (callback)
+            {
+                (*callback)(ret, userPointer);
+            }
 
             return ret;
         }

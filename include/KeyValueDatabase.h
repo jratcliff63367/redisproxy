@@ -6,6 +6,14 @@
 namespace keyvaluedatabase
 {
 
+#if defined(_MSC_VER)
+#define KVD_ABI __cdecl
+#else
+#define KVD_ABI
+#endif
+
+typedef void (KVD_ABI *KVD_existsCallback)(bool exists, void* userPtr);
+
 class KeyValueDatabase
 {
 public:
@@ -17,7 +25,7 @@ public:
     virtual void *get(const char *key, uint32_t &dataLen) = 0;
     virtual void releaseGetMem(void *mem) = 0;
 
-    virtual bool exists(const char *key) = 0;
+    virtual bool exists(const char *key,void *userPointer,KVD_existsCallback callback) = 0;
     virtual bool isList(const char *key) = 0;
     virtual void set(const char *key, const void *data, uint32_t dataLen) = 0;
 
