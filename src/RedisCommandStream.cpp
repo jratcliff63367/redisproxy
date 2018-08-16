@@ -217,6 +217,8 @@ namespace rediscommandstream
         { "XREAD"                         ,RedisCommand::XREAD},
         { "XREADGROUP"                    ,RedisCommand::XREADGROUP},
         { "XPENDING"                      ,RedisCommand::XPENDING},
+        // Responses
+        { "+OK"                           ,RedisCommand::OK },
     };
 
     // A simple struct associating an ASCII string with a unique enumerated keyword
@@ -383,6 +385,37 @@ public:
         else if (*cmd == '$')
         {
             mExpectedArgumentLength = atoi(cmd+1);    // length we expect the argument to be...
+            if (mExpectedArgumentCount == 0)
+            {
+                mExpectedArgumentCount = 1;
+                mArguments[0].mCommand = RedisCommand::RETURN_DATA;
+            }
+        }
+        else if (*cmd == '-')
+        {
+            ret = mArguments[0].mCommand = RedisCommand::ERR;
+            argc = 0;
+            uint32_t len = uint32_t(strlen(cmd));
+            uint8_t *dest = mCommandBuffer->confirmCapacity(len + 1); // make sure there is room to store it!
+            memcpy(dest, cmd, len + 1); // copy the argument with zero byte terminator
+            mArguments[0].mData = dest;
+            mArgumentCount = 1;
+        }
+        else if (*cmd == '+')
+        {
+            ret = mArguments[0].mCommand = getCommand(cmd);
+            argc = 0;
+            mArgumentCount = 1;
+        }
+        else if (*cmd == ':')
+        {
+            ret = mArguments[0].mCommand = RedisCommand::RETURN_CODE;
+            argc = 0;
+            uint32_t len = uint32_t(strlen(cmd+1));
+            uint8_t *dest = mCommandBuffer->confirmCapacity(len + 1); // make sure there is room to store it!
+            memcpy(dest, cmd+1, len + 1); // copy the argument with zero byte terminator
+            mArguments[0].mData = dest;
+            mArgumentCount = 1;
         }
         else
         {
@@ -406,7 +439,14 @@ public:
                         arg.mData = dest;
                         if (mArgumentCount == 0)
                         {
-                            arg.mCommand = getCommand(cmd);
+                            if (mArguments[0].mCommand == RedisCommand::RETURN_DATA)
+                            {
+
+                            }
+                            else
+                            {
+                                arg.mCommand = getCommand(cmd);
+                            }
                         }
                         else
                         {
@@ -535,12 +575,26 @@ public:
     // Semaphore indicating that all of the attributes have been processed and we can reset back to initial state
     virtual void resetAttributes(void) override final
     {
+        mArguments[0].mCommand = RedisCommand::NONE;
         mExpectedArgumentCount = 0;
         mArgumentCount = 0;
         mExpectedArgumentLength = 0;
     }
 
-    uint32_t                    mExpectedArgumentCount{ 0 };    // Expecte number of arguments
+    virtual const char *getCommandString(uint32_t &dataLen) override final
+    {
+        const char *ret = nullptr;
+        dataLen = 0;
+        if (mArgumentCount)
+        {
+            dataLen = mArguments[0].mDataLen;
+            ret = (const char *)mArguments[0].mData;
+        }
+        return ret;
+    }
+
+
+    uint32_t                    mExpectedArgumentCount{ 0 };    // Expected number of arguments
     uint32_t                    mArgumentCount{ 0 };            // current argument counter
     uint32_t                    mExpectedArgumentLength{ 0 };
     RedisArgument               mArguments[MAX_ARGS];           // arguments we found

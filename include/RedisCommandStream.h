@@ -229,6 +229,11 @@ enum class RedisCommand : uint32_t
     XREAD,									       // COUNT count] [BLOCK milliseconds] STREAMS key [key ...] ID [ID ...] : Return never seen elements in multiple streams, with IDs greater than the ones reported by the caller for each stream. Can block.
     XREADGROUP,									   // GROUP group consumer [COUNT count] [BLOCK milliseconds] STREAMS key [key ...] ID [ID ...] : Return new entries from a stream using a consumer group, or access the history of the pending entries for a given consumer. Can block.
     XPENDING,                                      // key group [start end count] [consumer] : Return information and entries from a stream consumer group pending entries list, that are messages fetched but never acknowledged.
+// Server responses!
+    OK,                                             // responds that things are 'ok'
+    ERR,                                            // error response
+    RETURN_CODE,                                    // return code value
+    RETURN_DATA,                                    // returned data from a request
 };
 
 
@@ -334,6 +339,8 @@ public:
     // convenience, but binary blobs you must pay attention to the data length.
     // Note, these values are only valid up until the time you call 'addStream' again
     virtual const char * getAttribute(uint32_t index, RedisAttribute &atr, uint32_t &dataLen) = 0;
+
+    virtual const char *getCommandString(uint32_t &dataLen) = 0;
 
     // Convert this string into a command, 'NONE' if unknown
     virtual RedisCommand getCommand(const char *c) const = 0;

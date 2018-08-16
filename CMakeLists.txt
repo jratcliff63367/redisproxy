@@ -87,6 +87,7 @@ set(Shared_SOURCES
 	include/RedisCommandStream.h
 	src/InputLine.cpp
 	src/KeyValueDatabase.cpp
+	src/KeyValueDatabaseRedis.cpp
 	src/RedisCommandStream.cpp
 )
 

@@ -15,6 +15,7 @@
 #include <vector>
 
 #define PORT_NUMBER 6379    // Redis port number
+//#define PORT_NUMBER 3010    // test port number
 
 typedef std::vector< std::string > StringVector;
 
@@ -25,6 +26,11 @@ public:
 	{
         printf("Received: %s\r\n", message);
 	}
+
+    virtual void receiveBinaryMessage(const void *data, uint32_t dataLen) override final
+    {
+
+    }
 };
 
 class SendFile : public IN_PARSER::InPlaceParserInterface

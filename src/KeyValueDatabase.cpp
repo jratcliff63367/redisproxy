@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unordered_map>
+#include <assert.h>
 
 #ifdef _MSC_VER
 #pragma warning(disable:4100)
@@ -151,10 +152,30 @@ namespace keyvaluedatabase
             }
         }
 
-        virtual bool exists(const char *_key,void *userPointer,KVD_existsCallback callback) override final
+
+        virtual void del(const char *_key, void *userPointer,KVD_returnCodeCallback callback) override final
         {
             bool ret = false;
+            lock();
+            std::string key(_key);
+            const auto &found = mDatabase.find(key);
+            if (found != mDatabase.end())
+            {
+                Value *v = (*found).second;
+                delete v;
+                mDatabase.erase(found);
+                ret = true;
+            }
+            unlock();
+            if (callback)
+            {
+                (*callback)(ret ? 1 : 0, userPointer);
+            }
+        }
 
+        virtual void exists(const char *_key,void *userPointer, KVD_returnCodeCallback callback) override final
+        {
+            bool ret = false;
             lock();
             std::string key(_key);
             const auto &found = mDatabase.find(key);
@@ -165,17 +186,12 @@ namespace keyvaluedatabase
             unlock();
             if (callback)
             {
-                (*callback)(ret, userPointer);
+                (*callback)(ret ? 1 : 0, userPointer);
             }
-
-            return ret;
         }
 
-        virtual void *get(const char *_key, uint32_t &dataLen) override final
+        virtual void get(const char *_key,void *userPointer, KVD_dataCallback callback) override final
         {
-            void *ret = nullptr;
-            dataLen = 0;
-
             lock();
             std::string key(_key);
             const auto &found = mDatabase.find(key);
@@ -184,23 +200,22 @@ namespace keyvaluedatabase
                 Value *v = found->second;
                 if (v->mRoot)
                 {
-                    ret = malloc(v->mRoot->mDataLen);
-                    memcpy(ret, v->mRoot->mData, v->mRoot->mDataLen);
-                    dataLen = v->mRoot->mDataLen;
+                    (*callback)(userPointer, v->mRoot->mData, v->mRoot->mDataLen);
+                }
+                else
+                {
+                    (*callback)(userPointer, nullptr, 0);
                 }
             }
+            else
+            {
+                (*callback)(userPointer, nullptr, 0);
+            }
             unlock();
-
-            return ret;
-        }
-
-        virtual void releaseGetMem(void *mem) override final
-        {
-            free(mem);
         }
 
         // append to an existing or new record; returns length of the list
-        virtual int32_t push(const char *_key, const void *data, uint32_t dataLen) override final
+        virtual void push(const char *_key, const void *data, uint32_t dataLen, void *userPointer, KVD_returnCodeCallback callback) override final
         {
             int32_t ret = -1;
             lock();
@@ -222,10 +237,12 @@ namespace keyvaluedatabase
                 }
             }
             unlock();
-            return ret;
+
+            (*callback)(ret, userPointer);
+
         }
 
-        virtual void set(const char *_key, const void *data, uint32_t dataLen) override final
+        virtual void set(const char *_key, const void *data, uint32_t dataLen, void *userPointer, KVD_standardCallback callback) override final
         {
             lock();
             std::string key(_key);
@@ -241,6 +258,7 @@ namespace keyvaluedatabase
                 v->newData(data, dataLen);
             }
             unlock();
+            (*callback)(true, userPointer);
         }
 
         virtual void release(void) override final
@@ -303,7 +321,7 @@ namespace keyvaluedatabase
             return ret;
         }
 
-        virtual bool isList(const char *key) override final
+        bool isList(const char *key)
         {
             bool ret = false;
 
@@ -332,14 +350,41 @@ namespace keyvaluedatabase
             // TODO
         }
 
+        // Give up a timeslice to the database system
+        virtual void pump(void) override final
+        {
+
+        }
+
+        virtual void select(uint32_t index, void *userPointer, KVD_standardCallback callback) override final
+        {
+            assert(callback);
+            if (!callback) return;
+            if (index == 0)
+            {
+                (*callback)(true, userPointer);
+            }
+            else
+            {
+                (*callback)(false, userPointer);
+            }
+        }
+
+
         std::mutex      mMutex;
         KeyValueMap mDatabase;
     };
 
-KeyValueDatabase *KeyValueDatabase::create(void)
+KeyValueDatabase *createKeyValueDatabaseRedis(void);
+
+KeyValueDatabase *KeyValueDatabase::create(Provider p)
 {
-    auto ret = new KeyValueDatabaseImpl;
-    return static_cast<KeyValueDatabase *>(ret);
+    if (p == IN_MEMORY)
+    {
+        auto ret = new KeyValueDatabaseImpl;
+        return static_cast<KeyValueDatabase *>(ret);
+    }
+    return createKeyValueDatabaseRedis();
 }
 
 

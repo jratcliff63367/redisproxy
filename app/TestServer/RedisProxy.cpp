@@ -27,6 +27,11 @@ namespace redisproxy
     public:
         RedisProxyImpl(keyvaluedatabase::KeyValueDatabase *database) : mDatabase(database)
         {
+            if (mDatabase == nullptr)
+            {
+                mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::REDIS);
+                mMyDatabase = true;
+            }
             static uint32_t gCount = 0;
             gCount++;
             mInstanceId = gCount;
@@ -57,6 +62,10 @@ namespace redisproxy
             {
                 mCommandStream->release();
             }
+            if (mMyDatabase && mDatabase)
+            {
+                mDatabase->release();
+            }
 #if USE_LOG_FILE
             if (mLogFile)
             {
@@ -74,25 +83,22 @@ namespace redisproxy
                 const char *key = mCommandStream->getAttribute(0, atr, dataLen);
                 if (key )
                 {
-                    if (!mDatabase->exists(key,nullptr,nullptr) || mDatabase->isList(key))
+                    const char *value = mCommandStream->getAttribute(1, atr, dataLen);
+
+                    mDatabase->push(key, value, dataLen, this, [](int32_t listCount, void *userPointer)
                     {
-                        const char *value = mCommandStream->getAttribute(1, atr, dataLen);
-                        int32_t listCount = mDatabase->push(key, value, dataLen);
+                        RedisProxyImpl *r = (RedisProxyImpl *)userPointer;
                         if (listCount >= 0)
                         {
                             char scratch[512];
                             snprintf(scratch, 512, ":%d", listCount);
-                            addResponse(scratch);
+                            r->addResponse(scratch);
                         }
                         else
                         {
-                            addResponse("(error) WRONGTYPE Operation against a key holding the wrong kind of value");
+                            r->addResponse("(error) WRONGTYPE Operation against a key holding the wrong kind of value");
                         }
-                    }
-                    else
-                    {
-                        addResponse("(error) WRONGTYPE Operation against a key holding the wrong kind of value");
-                    }
+                    });
                 }
             }
             else
@@ -169,14 +175,27 @@ namespace redisproxy
                     const char *data = mCommandStream->getAttribute(1, atr, dataLen);
                     if (key && data && mDatabase)
                     {
+#if 0 // TODO
                         if (mDatabase->exists(key,nullptr,nullptr))
                         {
                             addResponse(":0");
                         }
                         else
+#endif
                         {
-                            mDatabase->set(key, data, dataLen);
-                            addResponse(":1");
+                            mDatabase->set(key, data, dataLen, this, [](bool valid, void *userData)
+                            {
+                                RedisProxyImpl *r = (RedisProxyImpl *)userData;
+                                if( valid )
+                                {
+                                    r->addResponse(":1");
+                                }
+                                else
+                                {
+                                    r->addResponse("-ERR : Error");
+                                }
+                            });
+                            
                         }
                     }
                 }
@@ -241,6 +260,9 @@ namespace redisproxy
                 case rediscommandstream::RedisCommand::EXISTS:
                     exists(argc);
                     break;
+                case rediscommandstream::RedisCommand::DEL:
+                    del(argc);
+                    break;
                 case rediscommandstream::RedisCommand::GET:
                     get(argc);
                     break;
@@ -254,6 +276,13 @@ namespace redisproxy
                 }
             }
 
+
+            return ret;
+        }
+
+        virtual bool fromClient(const void *data, uint32_t dataLen) override final
+        {
+            bool ret = false;
 
             return ret;
         }
@@ -324,23 +353,25 @@ namespace redisproxy
                 const char *key = mCommandStream->getAttribute(0, atr, dataLen);
                 if (key && mDatabase)
                 {
-                    void *mem = mDatabase->get(key, dataLen);
-                    if (mem)
+                    mDatabase->get(key, this, [](void *userData, const void *mem, uint32_t dataLen)
                     {
-                        char scratch[512];
-                        snprintf(scratch, 512, "$%d", dataLen);
-                        addResponse(scratch);
-                        char *temp = (char *)malloc(dataLen + 1);
-                        memcpy(temp, mem, dataLen);
-                        temp[dataLen] = 0;
-                        addResponse(temp);
-                        free(temp);
-                        mDatabase->releaseGetMem(mem);
-                    }
-                    else
-                    {
-                        addResponse("$-1");
-                    }
+                        RedisProxyImpl *r = (RedisProxyImpl *)userData;
+                        if (mem)
+                        {
+                            char scratch[512];
+                            snprintf(scratch, 512, "$%d", dataLen);
+                            r->addResponse(scratch);
+                            char *temp = (char *)malloc(dataLen + 1);
+                            memcpy(temp, mem, dataLen);
+                            temp[dataLen] = 0;
+                            r->addResponse(temp);
+                            free(temp);
+                        }
+                        else
+                        {
+                            r->addResponse("$-1");
+                        }
+                    });
                 }
                 else
                 {
@@ -362,14 +393,37 @@ namespace redisproxy
                 const char *key = mCommandStream->getAttribute(0, atr, dataLen);
                 if (key && mDatabase)
                 {
-                    mDatabase->exists(key, this, [](bool found, void* userPtr)
+                    mDatabase->exists(key, this, [](int32_t response, void* userPtr)
                     {
                         RedisProxyImpl *o = (RedisProxyImpl *)userPtr;
-                        o->addResponse(found ? ":1" : ":0");
+                        o->addResponse(response > 0 ? ":1" : ":0");
                    });
                 }
             }
         }
+
+        void del(uint32_t argc)
+        {
+            if (argc == 0)
+            {
+                badArgs("del");
+            }
+            else
+            {
+                rediscommandstream::RedisAttribute atr;
+                uint32_t dataLen;
+                const char *key = mCommandStream->getAttribute(0, atr, dataLen);
+                if (key && mDatabase)
+                {
+                    mDatabase->del(key, this, [](int32_t response, void* userPtr)
+                    {
+                        RedisProxyImpl *o = (RedisProxyImpl *)userPtr;
+                        o->addResponse(response > 0 ? ":1" : ":0");
+                    });
+                }
+            }
+        }
+
 
         void set(uint32_t argc)
         {
@@ -377,14 +431,24 @@ namespace redisproxy
             {
                 if (mDatabase)
                 {
-
                     rediscommandstream::RedisAttribute atr;
                     uint32_t dataLen;
                     const char *key = mCommandStream->getAttribute(0, atr, dataLen);
                     const char *data = mCommandStream->getAttribute(1, atr, dataLen);
                     if (key && data && mDatabase )
                     {
-                        mDatabase->set(key, data, dataLen);
+                        mDatabase->set(key, data, dataLen, this, [](bool valid, void *userPtr)
+                        {
+                            RedisProxyImpl *r = (RedisProxyImpl *)userPtr;
+                            if (valid)
+                            {
+                                r->addResponse("+OK");
+                            }
+                            else
+                            {
+                                r->addResponse("-ERR : Error on set");
+                            }
+                        });
                     }
                 }
                 addResponse("+OK");
@@ -410,7 +474,9 @@ namespace redisproxy
         {
             if (key)
             {
+#if 0
                 if ( !mDatabase->exists(key,nullptr,nullptr) || mDatabase->isInteger(key))
+#endif
                 {
                     if (isNegative)
                     {
@@ -421,10 +487,12 @@ namespace redisproxy
                     snprintf(scratch, 512, ":%d", v);
                     addResponse(scratch);
                 }
+#if 0
                 else
                 {
                     addResponse("(error) ERR value is not an integer or out of range");
                 }
+#endif
             }
         }
 
@@ -475,10 +543,23 @@ namespace redisproxy
                 rediscommandstream::RedisAttribute atr;
                 uint32_t dataLen;
                 const char *sel = mCommandStream->getAttribute(0, atr, dataLen);
+                uint32_t index = 0;
                 if (sel)
                 {
-                    addResponse("+OK");
+                    index = atoi(sel);
                 }
+                mDatabase->select(index,this,[](bool selectOk,void *userPtr)
+                {
+                    RedisProxyImpl *r = (RedisProxyImpl *)userPtr;
+                    if (selectOk)
+                    {
+                        r->addResponse("+OK");
+                    }
+                    else
+                    {
+                        r->addResponse("(error) ERR DB index is out of range");
+                    }
+                });
             }
             else
             {
@@ -500,6 +581,10 @@ namespace redisproxy
 
         virtual void getToClient(Callback *c) override final
         {
+            if (mDatabase)
+            {
+                mDatabase->pump(); // pump cycle for the database (if it needs one)
+            }
             uint32_t streamLen;
             const uint8_t *scan = mResponseBuffer->getData(streamLen);	// Get the raw stream of responses
             if (streamLen)
@@ -599,7 +684,7 @@ namespace redisproxy
             }
         }
 
-
+        bool                                    mMyDatabase{ false };
         bool                                    mIsMulti{ false };
         uint32_t                                mInstanceId{ 0 };
         simplebuffer::SimpleBuffer	            *mResponseBuffer{ nullptr };// Where pending responses are stored

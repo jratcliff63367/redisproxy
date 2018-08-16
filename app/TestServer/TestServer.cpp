@@ -1,12 +1,12 @@
 
-#ifdef _MSC_VER
-#endif
-
 #include "socketchat.h"
 #include "wsocket.h"
 #include "InputLine.h"
 #include "RedisProxy.h"
 #include "KeyValueDatabase.h"
+#include "InParser.h"
+#include "Timer.h"
+#include "wplatform.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -15,10 +15,82 @@
 #include <string>
 #include <vector>
 
+#ifdef _MSC_VER
+#pragma warning(disable:4100)
+#endif
+
+typedef std::vector< std::string > StringVector;
+
 #define PORT_NUMBER 6379    // Redis port number
-//#define PORT_NUMBER 3009    // test port number
+//#define PORT_NUMBER 3010    // test port number
 
 using socketchat::SocketChat;
+
+
+class SendFile : public IN_PARSER::InPlaceParserInterface, public redisproxy::RedisProxy::Callback
+{
+public:
+    SendFile(const char *fname)
+    {
+        mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::REDIS);
+        mRedisProxy = redisproxy::RedisProxy::create(mDatabase);
+        IN_PARSER::InPlaceParser ipp;
+        ipp.SetFile(fname);
+        ipp.Parse(this);
+    }
+
+    virtual ~SendFile(void)
+    {
+        if (mDatabase)
+        {
+            mDatabase->release();
+        }
+        if (mRedisProxy)
+        {
+            mRedisProxy->release();
+        }
+    }
+
+
+    virtual int32_t ParseLine(uint32_t lineno, uint32_t argc, const char **argv)  override final
+    {
+        return 0;
+    }
+
+    virtual bool preParseLine(uint32_t /* lineno */, const char * line) override final
+    {
+        mStrings.push_back(std::string(line));
+        return true;
+    }
+
+    bool run(void)
+    {
+        if (mIndex < mStrings.size())
+        {
+            const char *str = mStrings[mIndex].c_str();
+            printf("Sending: %s\r\n", str);
+            mRedisProxy->fromClient(str);
+            timer::Timer t;
+            while (t.peekElapsedSeconds() < 0.1)
+            {
+                wplatform::sleepNano(1000);
+            }
+            mIndex++;
+        }
+        mRedisProxy->getToClient(this);
+        return true;
+    }
+
+    virtual void receiveRedisMessage(const char *msg) override final
+    {
+        printf("FromRedis: %s\r\n", msg);
+    }
+
+    uint32_t                            mIndex{ 0 };
+    StringVector                        mStrings;
+    keyvaluedatabase::KeyValueDatabase  *mDatabase{ nullptr };
+    redisproxy::RedisProxy              *mRedisProxy{ nullptr };
+};
 
 class ClientConnection : public socketchat::SocketChatCallback, public redisproxy::RedisProxy::Callback
 {
@@ -49,6 +121,7 @@ public:
         mClient->sendText(msg);
     }
 
+
     void pump(void)
 	{
 		if (mClient)
@@ -70,6 +143,11 @@ public:
 	{
         mRedisProxy->fromClient(message);
 	}
+
+    virtual void receiveBinaryMessage(const void *data, uint32_t dataLen) override final
+    {
+        mRedisProxy->fromClient(data, dataLen);
+    }
 
 	bool isConnected(void)
 	{
@@ -98,8 +176,7 @@ public:
 	{
 		mServerSocket = wsocket::Wsocket::create(SOCKET_SERVER, PORT_NUMBER);
 		mInputLine = inputline::InputLine::create();
-        mDatabase = keyvaluedatabase::KeyValueDatabase::create();
-
+        mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::IN_MEMORY);
 		printf("Simple Websockets chat server started.\r\n");
 		printf("Type 'bye', 'quit', or 'exit' to stop the server.\r\n");
 		printf("Type anything else to send as a broadcast message to all current client connections.\r\n");
@@ -128,7 +205,7 @@ public:
 	void run(void)
 	{
 		bool exit = false;
-
+        SendFile *sf = nullptr;
 		while (!exit)
 		{
 			if (mServerSocket)
@@ -153,8 +230,37 @@ public:
 					{
 						exit = true;
 					}
+                    else if (strcmp(str, "test") == 0)
+                    {
+                        delete sf;
+                        sf = new SendFile("f:\\test.txt");
+                    }
+                    else if (strcmp(str, "file1") == 0)
+                    {
+                        delete sf;
+                        sf = new SendFile("f:\\logfile1.txt");
+                    }
+                    else if (strcmp(str, "file2") == 0)
+                    {
+                        delete sf;
+                        sf = new SendFile("f:\\logfile2.txt");
+                    }
+                    else if (strcmp(str, "file3") == 0)
+                    {
+                        delete sf;
+                        sf = new SendFile("f:\\logfile3.txt");
+                    }
+                    else if (strcmp(str, "file4") == 0)
+                    {
+                        delete sf;
+                        sf = new SendFile("f:\\logfile4.txt");
+                    }
 				}
 			}
+            if (sf)
+            {
+                sf->run();
+            }
 
 			// See if any clients have dropped connection
 			bool killed = true;
@@ -184,6 +290,7 @@ public:
                 i->pump();
 			}
 		}
+        delete sf;
 	}
 
 	wsocket::Wsocket		*mServerSocket{ nullptr };

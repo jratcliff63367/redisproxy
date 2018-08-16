@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 // This class pretends to implement the Redis API
 // It doesn't really, except in the simplest terms.
 // This is entirely educational.
@@ -25,6 +26,7 @@ public:
 	static RedisProxy *create(keyvaluedatabase::KeyValueDatabase *database);
 
 	virtual bool fromClient(const char *message) = 0;
+    virtual bool fromClient(const void *data, uint32_t dataLen) = 0;
 
 	virtual void getToClient(Callback *c) = 0;
 

@@ -18,6 +18,8 @@ class SocketChatCallback
 {
 public:
 	virtual void receiveMessage(const char *data) = 0;
+    // if the data stream has non ASCII data in it
+    virtual void receiveBinaryMessage(const void *data, uint32_t dataLen) = 0;
 };
 
 class SocketChat 
@@ -52,6 +54,9 @@ public:
 
 	// Send a text message to the server.  Assumed zero byte terminated ASCIIZ string
 	virtual void sendText(const char *str) = 0;
+
+    // Send as binary data, still has a CR/LF appended after the binary content
+    virtual void sendBinary(const void *data, uint32_t dataLen) = 0;
 
 	// Close the connection
 	virtual void close() = 0;

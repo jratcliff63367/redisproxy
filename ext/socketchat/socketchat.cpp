@@ -131,7 +131,6 @@ namespace socketchat
             }
             else
             {
-                // Advance the buffer pointer by the number of bytes read
                 mReceiveBuffer->addBuffer(nullptr, ret);
             }
         }
@@ -186,16 +185,22 @@ namespace socketchat
             {
                 break;
             }
+            bool isBinary = false;
             bool haveMessage = false;
             uint32_t messageEnd = 0;
             for (uint32_t i = 0; i < (dataLen - 1); i++)
             {
-                if (data[i] == 13 &&
+                uint8_t c = data[i];
+                if (c == 13 &&
                     data[i+1] == 10)
                 {
                     haveMessage = true;
                     messageEnd = i;
                     break;
+                }
+                else if (c < 32 || c > 127)
+                {
+                    isBinary = true;
                 }
             }
             if (!haveMessage)
@@ -203,9 +208,23 @@ namespace socketchat
                 break;
             }
             data[messageEnd] = 0;
-            callback->receiveMessage((const char *)data);
+            if (isBinary)
+            {
+                callback->receiveBinaryMessage(data, messageEnd);
+            }
+            else
+            {
+                callback->receiveMessage((const char *)data);
+            }
             mReceiveBuffer->consume(messageEnd + 2);
         }
+    }
+
+    // Send as binary data, still has a CR/LF appended after the binary content
+    virtual void sendBinary(const void *data, uint32_t dataLen) override final
+    {
+        mTransmitBuffer->addBuffer(data, dataLen);
+        mTransmitBuffer->addBuffer("\r\n", 2);
     }
 
 		virtual void sendText(const char *str) override final
