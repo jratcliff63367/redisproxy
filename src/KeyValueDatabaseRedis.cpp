@@ -28,6 +28,7 @@ namespace keyvaluedatabase
         NONE,
         SELECT,
         SET,
+        SETNX,
         EXISTS,
         DEL,
         GET,
@@ -217,6 +218,37 @@ namespace keyvaluedatabase
             addPendingResponse(RedisCommand::SET, callback, userPointer);
         }
 
+        virtual void setnx(const char *key, const void *data, uint32_t dataLen, void *userPointer, KVD_returnCodeCallback callback) override final
+        {
+            assert(callback); // not implemented yet
+
+            mSocketChat->sendText("*3");
+
+            mSocketChat->sendText("$5");
+            mSocketChat->sendText("SETNX");
+
+            initMemoryStream();
+            uint32_t dlen = uint32_t(strlen(key));
+            mOutput << "$";
+            mOutput << dlen;
+            mOutput << char(0);
+            mSocketChat->sendText((const char *)mScratchBuffer);
+
+            mSocketChat->sendText(key);
+
+            initMemoryStream();
+            mOutput << "$";
+            mOutput << dataLen;
+            mOutput << char(0);
+            mSocketChat->sendText((const char *)mScratchBuffer);
+
+            mSocketChat->sendBinary(data, dataLen);
+
+
+            addPendingResponse(RedisCommand::SETNX, callback, userPointer);
+        }
+
+
         // append to an existing or new record; returns size of the list or -1 if unable to do a push
         virtual void push(const char *key, const void *data, uint32_t dataLen, void *userPointer, KVD_returnCodeCallback callback) override final
         {
@@ -372,6 +404,7 @@ namespace keyvaluedatabase
             case RedisCommand::EXISTS:
             case RedisCommand::DEL:
             case RedisCommand::INCREMENT:
+            case RedisCommand::SETNX:
             {
                 KVD_returnCodeCallback callback = (KVD_returnCodeCallback)prc.mCallback;
                 uint32_t dataLen;
@@ -450,11 +483,6 @@ namespace keyvaluedatabase
             prc.mCallback = callback;
             prc.mUserPointer = userPtr;
             mPendingRedisCommands.push(prc);
-        }
-
-        virtual void setnx(const char *key, const void *data, uint32_t dataLen, void *userPointer, KVD_returnCodeCallback callback) override final
-        {
-            assert(0); // not yet implemented
         }
 
 
