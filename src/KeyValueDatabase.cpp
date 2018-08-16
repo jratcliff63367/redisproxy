@@ -169,7 +169,7 @@ namespace keyvaluedatabase
             unlock();
             if (callback)
             {
-                (*callback)(ret ? 1 : 0, userPointer);
+                (*callback)(true,ret ? 1 : 0, userPointer);
             }
         }
 
@@ -186,7 +186,7 @@ namespace keyvaluedatabase
             unlock();
             if (callback)
             {
-                (*callback)(ret ? 1 : 0, userPointer);
+                (*callback)(true,ret ? 1 : 0, userPointer);
             }
         }
 
@@ -238,7 +238,7 @@ namespace keyvaluedatabase
             }
             unlock();
 
-            (*callback)(ret, userPointer);
+            (*callback)(true,ret, userPointer);
 
         }
 
@@ -276,7 +276,7 @@ namespace keyvaluedatabase
             mMutex.unlock();
         }
 
-        virtual bool isInteger(const char *key) override final
+        bool isInteger(const char *key) 
         {
             bool ret = false;
 
@@ -289,9 +289,11 @@ namespace keyvaluedatabase
             return ret;
         }
 
-        virtual int32_t increment(const char *key,int32_t v) override final
+        virtual void increment(const char *key,int32_t v, void *userPointer, KVD_returnCodeCallback callback) override final
         {
             int32_t ret = 0;
+
+            bool isOk = false;
 
             lock();
 
@@ -302,6 +304,7 @@ namespace keyvaluedatabase
                 snprintf(scratch, 512, "%d", v);
                 Value *vstore = new Value(scratch, uint32_t(strlen(scratch)),false);
                 mDatabase[std::string(key)] = vstore;
+                isOk = true;
                 ret = v;
             }
             else
@@ -314,11 +317,11 @@ namespace keyvaluedatabase
                     char scratch[512];
                     snprintf(scratch, 512, "%d", ret);
                     vv->newData(scratch, uint32_t(strlen(scratch)));
+                    isOk = true;
                 }
             }
             unlock();
-
-            return ret;
+            (*callback)(isOk, ret, userPointer);
         }
 
         bool isList(const char *key)
@@ -340,14 +343,14 @@ namespace keyvaluedatabase
         }
 
         // not use fully implemented
-        virtual void watch(const char *key) override final
+        virtual void watch(uint32_t keyCount, const char **keys, void *userData, KVD_standardCallback callback) override final
         {
-            // TODO
+            (*callback)(true, userData);
         }
 
-        virtual void unwatch(const char *key) override final
+        virtual void unwatch(void *userData, KVD_standardCallback callback) override final
         {
-            // TODO
+            (*callback)(true, userData);
         }
 
         // Give up a timeslice to the database system
@@ -368,6 +371,22 @@ namespace keyvaluedatabase
             {
                 (*callback)(false, userPointer);
             }
+        }
+
+        virtual void setnx(const char *_key, const void *data, uint32_t dataLen, void *userPointer, KVD_returnCodeCallback callback) override final
+        {
+            bool added = false;
+            lock();
+            std::string key(_key);
+            const auto &found = mDatabase.find(key);
+            if (found == mDatabase.end())
+            {
+                Value *v = new Value(data, dataLen, false);
+                mDatabase[key] = v;
+                added = true;
+            }
+            unlock();
+            (*callback)(true,added ? 1 : 0, userPointer);
         }
 
 

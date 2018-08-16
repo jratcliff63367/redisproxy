@@ -13,7 +13,7 @@ namespace keyvaluedatabase
 #endif
 
 typedef void (KVD_ABI *KVD_standardCallback)(bool ok, void* userPtr);
-typedef void (KVD_ABI *KVD_returnCodeCallback)(int32_t ok, void* userPtr);
+typedef void (KVD_ABI *KVD_returnCodeCallback)(bool commandOk,int32_t returnCode, void* userPtr);
 typedef void (KVD_ABI *KVD_dataCallback)(void* userPtr,const void *data,uint32_t dataLen);
 
 class KeyValueDatabase
@@ -37,18 +37,20 @@ public:
     virtual void del(const char *key, void *userPointer,KVD_returnCodeCallback callback) = 0;
 
     virtual void exists(const char *key,void *userPointer, KVD_returnCodeCallback callback) = 0;
+
     virtual void set(const char *key, const void *data, uint32_t dataLen, void *userPointer, KVD_standardCallback callback) = 0;
+    virtual void setnx(const char *key, const void *data, uint32_t dataLen, void *userPointer, KVD_returnCodeCallback callback) = 0;
 
     // append to an existing or new record; returns size of the list or -1 if unable to do a push
     virtual void push(const char *key, const void *data, uint32_t dataLen,void *userPointer, KVD_returnCodeCallback callback) = 0;
 
-    virtual int32_t increment(const char *key,int32_t value) = 0;
-    virtual bool isInteger(const char *key) = 0;
+    virtual void increment(const char *key,int32_t value,void *userPointer,KVD_returnCodeCallback callback) = 0;
+
 
     // not use fully implemented
-    virtual void watch(const char *key) = 0;
+    virtual void watch(uint32_t keyCount,const char **keys,void *userData,KVD_standardCallback callback) = 0;
 
-    virtual void unwatch(const char *key) = 0;
+    virtual void unwatch(void *userData, KVD_standardCallback callback) = 0;
 
 	virtual void release(void) = 0;
 

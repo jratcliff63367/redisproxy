@@ -30,7 +30,10 @@ namespace keyvaluedatabase
         SET,
         EXISTS,
         DEL,
-        GET
+        GET,
+        WATCH,
+        UNWATCH,
+        INCREMENT,
     };
 
     class PendingRedisCommand
@@ -220,33 +223,52 @@ namespace keyvaluedatabase
             assert(0); // not implemented yet
         }
 
-        virtual int32_t increment(const char *key, int32_t value) override final
+        virtual void increment(const char *key, int32_t v, void *userPointer, KVD_returnCodeCallback callback) override final
         {
-            int32_t ret = 0;
-
-            assert(0); // not implemented yet
-
-            return ret;
-        }
-
-        virtual bool isInteger(const char *key) override final
-        {
-            bool ret = false;
-
-            assert(0); // not implemented yet
-
-            return ret;
+            char scratch[512];
+            if (v >= 0)
+            {
+                snprintf(scratch,512, "incrby \"%s\" %d", key, v);
+            }
+            else
+            {
+                snprintf(scratch, 512, "decrby \"%s\" %d", key, -v);
+            }
+            mSocketChat->sendText(scratch);
+            addPendingResponse(RedisCommand::INCREMENT, callback, userPointer);
         }
 
         // not use fully implemented
-        virtual void watch(const char *key) override final
+        virtual void watch(uint32_t keyCount, const char **keys, void *userData, KVD_standardCallback callback) override final
         {
-            assert(0); // not implemented yet
+            initMemoryStream();
+            mOutput << "*";
+            mOutput << keyCount + 1;
+            mOutput << char(0);
+            mSocketChat->sendText((const char *)mScratchBuffer);
+
+            mSocketChat->sendText("$5");
+            mSocketChat->sendText("WATCH");
+
+            for (uint32_t i = 0; i < keyCount; i++)
+            {
+                const char *key = keys[i];
+                initMemoryStream();
+                uint32_t dlen = uint32_t(strlen(key));
+                mOutput << "$";
+                mOutput << dlen;
+                mOutput << char(0);
+                mSocketChat->sendText((const char *)mScratchBuffer);
+                mSocketChat->sendText(key);
+            }
+
+            addPendingResponse(RedisCommand::WATCH, callback, userData);
         }
 
-        virtual void unwatch(const char *key) override final
+        virtual void unwatch(void *userData, KVD_standardCallback callback) override final
         {
-            assert(0); // not implemented yet
+            mSocketChat->sendText("unwatch");
+            addPendingResponse(RedisCommand::UNWATCH, callback, userData);
         }
 
         virtual void release(void) override final
@@ -349,12 +371,13 @@ namespace keyvaluedatabase
             {
             case RedisCommand::EXISTS:
             case RedisCommand::DEL:
+            case RedisCommand::INCREMENT:
             {
                 KVD_returnCodeCallback callback = (KVD_returnCodeCallback)prc.mCallback;
                 uint32_t dataLen;
                 const char *c = mCommandStream->getCommandString(dataLen);
                 int32_t value = c ? atoi(c) : -1;
-                (*callback)(value, prc.mUserPointer);
+                (*callback)(true,value, prc.mUserPointer);
             }
             break;
             default:
@@ -376,6 +399,8 @@ namespace keyvaluedatabase
             {
                 case RedisCommand::SELECT:
                 case RedisCommand::SET:
+                case RedisCommand::WATCH:
+                case RedisCommand::UNWATCH:
                     {
                     KVD_standardCallback callback = (KVD_standardCallback)prc.mCallback;
                     (*callback)(true, prc.mUserPointer);
@@ -405,6 +430,12 @@ namespace keyvaluedatabase
                 (*callback)(false, prc.mUserPointer);
             }
             break;
+            case RedisCommand::INCREMENT:
+            {
+                KVD_returnCodeCallback callback = (KVD_returnCodeCallback)prc.mCallback;
+                (*callback)(false, 0, prc.mUserPointer);
+            }
+                break;
             default:
                 assert(0); // not implemented yet
                 break;
@@ -420,6 +451,12 @@ namespace keyvaluedatabase
             prc.mUserPointer = userPtr;
             mPendingRedisCommands.push(prc);
         }
+
+        virtual void setnx(const char *key, const void *data, uint32_t dataLen, void *userPointer, KVD_returnCodeCallback callback) override final
+        {
+            assert(0); // not yet implemented
+        }
+
 
         simplebuffer::SimpleBuffer	            *mRedisSendBuffer{ nullptr };// Where pending responses are stored
         rediscommandstream::RedisCommandStream  *mCommandStream{ nullptr };
