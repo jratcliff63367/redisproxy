@@ -19,10 +19,12 @@
 #pragma warning(disable:4100)
 #endif
 
+#define USE_MONITOR 1
+
 typedef std::vector< std::string > StringVector;
 
-#define PORT_NUMBER 6379    // Redis port number
-//#define PORT_NUMBER 3010    // test port number
+//#define PORT_NUMBER 6379    // Redis port number
+#define PORT_NUMBER 3010    // test port number
 
 using socketchat::SocketChat;
 
@@ -32,8 +34,12 @@ class SendFile : public IN_PARSER::InPlaceParserInterface, public redisproxy::Re
 public:
     SendFile(const char *fname)
     {
+#if !USE_MONITOR
         mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::REDIS);
         mRedisProxy = redisproxy::RedisProxy::create(mDatabase);
+#else
+        mRedisProxy = redisproxy::RedisProxy::createMonitor();
+#endif
         IN_PARSER::InPlaceParser ipp;
         ipp.SetFile(fname);
         ipp.Parse(this);
@@ -74,6 +80,7 @@ public:
             while (t.peekElapsedSeconds() < 0.1)
             {
                 wplatform::sleepNano(1000);
+                mRedisProxy->getToClient(this);
             }
             mIndex++;
         }
@@ -83,7 +90,26 @@ public:
 
     virtual void receiveRedisMessage(const char *msg) override final
     {
-        printf("FromRedis: %s\r\n", msg);
+        printf("FromRedis:%s\r\n", msg);
+    }
+
+    virtual void receiveRedisMessage(const void *msg, uint32_t dataLen)
+    {
+        printf("FromRedis:");
+        const uint8_t *scan = (const uint8_t *)msg;
+        for (uint32_t i = 0; i < dataLen; i++)
+        {
+            uint8_t c = scan[i];
+            if (c >= 32 && c <= 127)
+            {
+                printf("%c", c);
+            }
+            else
+            {
+                printf("$%02X", c);
+            }
+        }
+        printf("\r\n");
     }
 
     uint32_t                            mIndex{ 0 };
@@ -98,7 +124,11 @@ public:
 	ClientConnection(wsocket::Wsocket *client,uint32_t id,keyvaluedatabase::KeyValueDatabase *dataBase) : mId(id), mDatabase(dataBase)
 	{
 		mClient = socketchat::SocketChat::create(client);
+#if !USE_MONITOR
         mRedisProxy = redisproxy::RedisProxy::create(mDatabase);
+#else
+        mRedisProxy = redisproxy::RedisProxy::createMonitor();
+#endif
 	}
 
 	virtual ~ClientConnection(void)
@@ -121,6 +151,25 @@ public:
         mClient->sendText(msg);
     }
 
+    virtual void receiveRedisMessage(const void *data, uint32_t dataLen) override final
+    {
+        printf("Sending:");
+        const uint8_t *scan = (const uint8_t *)data;
+        for (uint32_t i = 0; i < dataLen; i++)
+        {
+            uint8_t c = scan[i];
+            if (c >= 32 && c <= 127)
+            {
+                printf("%c", c);
+            }
+            else
+            {
+                printf("$%02X", c);
+            }
+        }
+        printf("\r\n");
+        mClient->sendBinary(data, dataLen);
+    }
 
     void pump(void)
 	{
@@ -143,6 +192,7 @@ public:
 	{
         mRedisProxy->fromClient(message);
 	}
+
 
     virtual void receiveBinaryMessage(const void *data, uint32_t dataLen) override final
     {

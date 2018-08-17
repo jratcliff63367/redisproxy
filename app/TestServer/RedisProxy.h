@@ -21,10 +21,12 @@ public:
     {
     public:
         virtual void receiveRedisMessage(const char *msg) = 0;
+        virtual void receiveRedisMessage(const void *data, uint32_t dataLen) = 0;
     };
     // Provides the *shared* keyvalue database that all connections talk to.
     // If 'database' is null, then a new unique data base per connection will be created
 	static RedisProxy *create(keyvaluedatabase::KeyValueDatabase *database);
+    static RedisProxy *createMonitor(void);
 
 	virtual bool fromClient(const char *message) = 0;
     virtual bool fromClient(const void *data, uint32_t dataLen) = 0;

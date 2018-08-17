@@ -14,8 +14,8 @@
 #include <string>
 #include <vector>
 
-#define PORT_NUMBER 6379    // Redis port number
-//#define PORT_NUMBER 3010    // test port number
+//#define PORT_NUMBER 6379    // Redis port number
+#define PORT_NUMBER 3010    // test port number
 
 typedef std::vector< std::string > StringVector;
 

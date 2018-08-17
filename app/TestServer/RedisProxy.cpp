@@ -14,7 +14,7 @@
 #pragma warning(disable:4100)
 #endif
 
-#define USE_LOG_FILE 0
+#define USE_LOG_FILE 1
 
 #define MAX_COMMAND_STRING (1024*4) // 4k
 #define MAX_TOTAL_MEMORY (1024*1024)*1024	// 1gb
@@ -43,7 +43,7 @@ namespace redisproxy
             static uint32_t gLogCount = 0;
             gLogCount++;
             char scratch[512];
-            snprintf(scratch, 512, "f:\\logfile%d.txt", gLogCount);
+            snprintf(scratch, 512, "f:\\RedisProxy%d.txt", gLogCount);
             mLogFile = fopen(scratch, "wb");
 #endif
         }
@@ -293,7 +293,7 @@ namespace redisproxy
             bool ret = false;
 
 #if USE_LOG_FILE
-            fprintf(mLogFile, "%s\r\n", message);
+            fprintf(mLogFile, "[Client]%s\r\n", message);
             fflush(mLogFile);
 #endif
             printf("Receiving: %s\n", message);
@@ -452,7 +452,6 @@ namespace redisproxy
                         });
                     }
                 }
-                addResponse("+OK");
             }
             else
             {
@@ -601,6 +600,13 @@ namespace redisproxy
                     else
                     {
                         const char *msg = (const char *)&header[1];
+#if USE_LOG_FILE
+                        if (mLogFile)
+                        {
+                            fprintf(mLogFile, "[Server]%s\r\n", msg);
+                            fflush(mLogFile);
+                        }
+#endif
                         c->receiveRedisMessage(msg);
                     }
                     scan += (stringLen + 1 + sizeof(uint32_t));	// Advance to the next response

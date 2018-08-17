@@ -104,6 +104,7 @@ set(TestServer_SOURCES
 	app/TestServer/TestServer.cpp
 	app/TestServer/
 	app/TestServer/RedisProxy.cpp
+	app/TestServer/RedisMonitor.cpp
 )
 
 
