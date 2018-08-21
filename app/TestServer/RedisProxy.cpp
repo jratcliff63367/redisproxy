@@ -11,7 +11,7 @@
 #include <string.h>
 
 #ifdef _MSC_VER
-#pragma warning(disable:4100)
+#pragma warning(disable:4100 4456 4189)
 #endif
 
 #define USE_LOG_FILE 1
@@ -267,6 +267,9 @@ namespace redisproxy
                 case rediscommandstream::RedisCommand::GET:
                     get(argc);
                     break;
+                case rediscommandstream::RedisCommand::SCAN:
+                    scan(argc);
+                    break;
                 default:
                     assert(0); // command not yet implemented!
                     break;
@@ -339,6 +342,42 @@ namespace redisproxy
             char scratch[512];
             snprintf(scratch, 512, "-ERR wrong number of arguments for '%s' command", cmd);
             addResponse(scratch);
+        }
+
+        void scan(uint32_t argc)
+        {
+            if (argc == 0)
+            {
+                badArgs("scan");
+            }
+            else
+            {
+                rediscommandstream::RedisAttribute atr;
+                uint32_t dataLen;
+                const char *key = mCommandStream->getAttribute(0, atr, dataLen);
+                if (key && mDatabase)
+                {
+                    const char *match = nullptr;
+                    const char *count = nullptr;
+                    if (argc >= 3)
+                    {
+                        const char *cmd = mCommandStream->getAttribute(1, atr, dataLen);
+                        if (atr == rediscommandstream::RedisAttribute::MATCH)
+                        {
+                            match = mCommandStream->getAttribute(2, atr, dataLen);
+                        }
+                        if (argc >= 5)
+                        {
+                            cmd = mCommandStream->getAttribute(3, atr, dataLen);
+                            if (atr == rediscommandstream::RedisAttribute::COUNT)
+                            {
+                                count = mCommandStream->getAttribute(4, atr, dataLen);
+                            }
+                        }
+                    }
+                    printf("%s : %s : %s\r\n", key, match, count);
+                }
+            }
         }
 
         void get(uint32_t argc)

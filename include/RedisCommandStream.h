@@ -58,7 +58,7 @@ enum class RedisCommand : uint32_t
     //CONFIG,									   // SET parameter value : Set a configuration parameter to the given value
     //CONFIG,									   // RESETSTAT : Reset the stats returned by INFO
     DBSIZE,										   // Return the number of keys in the selected database
-    DEBUG,										   // OBJECT key : Get debugging information about a key
+    REDIS_DEBUG,										   // OBJECT key : Get debugging information about a key
     //DEBUG,									   // SEGFAULT : Make the server crash
     DECR,										   // key : Decrement the integer value of a key by one
     DECRBY,										   // key decrement : Decrement the integer value of a key by the given number
@@ -298,7 +298,7 @@ enum class RedisAttribute : uint32_t
 	COPY,
 	REPLACE,
 	SAMPLES,
-	DEBUG,
+	REDIS_DEBUG,
 	YES,
 	SYNC,
 	NO,

@@ -15,7 +15,9 @@
 #pragma warning(disable:4100)
 #endif
 
-#define REDIS_PORT_NUMBER 6379    // Redis port number
+//#define REDIS_PORT_NUMBER 6379    // Redis port number
+#define REDIS_PORT_NUMBER 3010    // Redis port number; using the monitor intercept server
+
 #define MAX_COMMAND_STRING (1024*4) // 4k
 #define MAX_TOTAL_MEMORY (1024*1024)*1024	// 1gb
 #define MAX_PENDING_COMMAND_COUNT 256

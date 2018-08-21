@@ -31,16 +31,19 @@ namespace redisproxy
     public:
         RedisProxyMonitor(void)
         {
+#if 1
             if (gClientCommands == nullptr)
             {
                 gClientCommands = fopen("f:\\clientcommands.txt", "wb");
             }
-            mSocketChat = socketchat::SocketChat::create("localhost", REDIS_PORT_NUMBER);
             static uint32_t gCount = 0;
             gCount++;
             char scratch[512];
             snprintf(scratch, 512, "f:\\redismonitor%d.txt", gCount);
             mFph = fopen(scratch, "wb");
+#endif
+            mSocketChat = socketchat::SocketChat::create("localhost", REDIS_PORT_NUMBER);
+
             mResponseBuffer = simplebuffer::SimpleBuffer::create(MAX_COMMAND_STRING, MAX_TOTAL_MEMORY);
         }
 

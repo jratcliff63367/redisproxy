@@ -32,7 +32,7 @@ using socketchat::SocketChat;
 class SendFile : public IN_PARSER::InPlaceParserInterface, public redisproxy::RedisProxy::Callback
 {
 public:
-    SendFile(const char *fname)
+    SendFile(void)
     {
 #if !USE_MONITOR
         mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::REDIS);
@@ -40,9 +40,6 @@ public:
 #else
         mRedisProxy = redisproxy::RedisProxy::createMonitor();
 #endif
-        IN_PARSER::InPlaceParser ipp;
-        ipp.SetFile(fname);
-        ipp.Parse(this);
     }
 
     virtual ~SendFile(void)
@@ -57,6 +54,17 @@ public:
         }
     }
 
+    void sendFile(const char *fname)
+    {
+        IN_PARSER::InPlaceParser ipp;
+        ipp.SetFile(fname);
+        ipp.Parse(this);
+    }
+
+    void sendCommand(const char *cmd)
+    {
+        mStrings.push_back(std::string(cmd));
+    }
 
     virtual int32_t ParseLine(uint32_t lineno, uint32_t argc, const char **argv)  override final
     {
@@ -65,7 +73,13 @@ public:
 
     virtual bool preParseLine(uint32_t /* lineno */, const char * line) override final
     {
+#if 0
+        char scratch[512];
+        snprintf(scratch, 512, "del \"%s\"", line);
+        mStrings.push_back(std::string(scratch));
+#else
         mStrings.push_back(std::string(line));
+#endif
         return true;
     }
 
@@ -90,11 +104,28 @@ public:
 
     virtual void receiveRedisMessage(const char *msg) override final
     {
+#if 0
+        static uint32_t gCount = 0;
+        gCount++;
+        if ( (gCount%1000) == 0 )
+        {
+            printf("Received: %d message from Redis\r\n", gCount);
+        }
+#else
         printf("FromRedis:%s\r\n", msg);
+#endif
     }
 
     virtual void receiveRedisMessage(const void *msg, uint32_t dataLen)
     {
+#if 0
+        static uint32_t gCount = 0;
+        gCount++;
+        if ((gCount % 1000) == 0)
+        {
+            printf("Received: %d message from Redis\r\n", gCount);
+        }
+#elise
         printf("FromRedis:");
         const uint8_t *scan = (const uint8_t *)msg;
         for (uint32_t i = 0; i < dataLen; i++)
@@ -110,6 +141,7 @@ public:
             }
         }
         printf("\r\n");
+#endif
     }
 
     uint32_t                            mIndex{ 0 };
@@ -219,14 +251,16 @@ public:
 
 typedef std::vector< ClientConnection * > ClientConnectionVector;
 
-class SimpleServer
+class SimpleServer : public redisproxy::RedisProxy::Callback
 {
 public:
 	SimpleServer(void)
 	{
 		mServerSocket = wsocket::Wsocket::create(SOCKET_SERVER, PORT_NUMBER);
 		mInputLine = inputline::InputLine::create();
-        mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::IN_MEMORY);
+        mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::REDIS);
+        mRedisProxy = redisproxy::RedisProxy::create(mDatabase);
+
 		printf("Simple Websockets chat server started.\r\n");
 		printf("Type 'bye', 'quit', or 'exit' to stop the server.\r\n");
 		printf("Type anything else to send as a broadcast message to all current client connections.\r\n");
@@ -234,6 +268,10 @@ public:
 
 	~SimpleServer(void)
 	{
+        if (mRedisProxy)
+        {
+            mRedisProxy->release();
+        }
 		if (mInputLine)
 		{
 			mInputLine->release();
@@ -255,12 +293,14 @@ public:
 	void run(void)
 	{
 		bool exit = false;
+
         SendFile *sf = nullptr;
 		while (!exit)
 		{
 			if (mServerSocket)
 			{
 				wsocket::Wsocket *clientSocket = mServerSocket->pollServer();
+
 				if (clientSocket)
 				{
 					uint32_t index = uint32_t(mClients.size()) + 1;
@@ -269,6 +309,7 @@ public:
 					mClients.push_back(cc);
 				}
 			}
+
 			if (mInputLine)
 			{
 				const char *str = mInputLine->getInputLine();
@@ -280,37 +321,43 @@ public:
 					{
 						exit = true;
 					}
+                    else if (strcmp(str, "kill") == 0)
+                    {
+                        if (sf == nullptr)
+                        {
+                            sf = new SendFile;
+                        }
+                        sf->sendFile("f:\\kill.txt");
+                    }
                     else if (strcmp(str, "test") == 0)
                     {
-                        delete sf;
-                        sf = new SendFile("f:\\test.txt");
+                        if (sf == nullptr)
+                        {
+                            sf = new SendFile;
+                        }
+                        sf->sendFile("f:\\test.txt");
                     }
                     else if (strcmp(str, "file1") == 0)
                     {
-                        delete sf;
-                        sf = new SendFile("f:\\logfile1.txt");
+                        if (sf == nullptr)
+                        {
+                            sf = new SendFile;
+                        }
+                        sf->sendFile("f:\\logfile1.txt");
                     }
-                    else if (strcmp(str, "file2") == 0)
+                    else
                     {
-                        delete sf;
-                        sf = new SendFile("f:\\logfile2.txt");
-                    }
-                    else if (strcmp(str, "file3") == 0)
-                    {
-                        delete sf;
-                        sf = new SendFile("f:\\logfile3.txt");
-                    }
-                    else if (strcmp(str, "file4") == 0)
-                    {
-                        delete sf;
-                        sf = new SendFile("f:\\logfile4.txt");
+                        mRedisProxy->fromClient(str);
                     }
 				}
 			}
+
             if (sf)
             {
                 sf->run();
             }
+
+            mRedisProxy->getToClient(this);
 
 			// See if any clients have dropped connection
 			bool killed = true;
@@ -343,9 +390,34 @@ public:
         delete sf;
 	}
 
-	wsocket::Wsocket		*mServerSocket{ nullptr };
-	inputline::InputLine	*mInputLine{ nullptr };
-	ClientConnectionVector	mClients;
+    virtual void receiveRedisMessage(const char *msg) override final
+    {
+        printf("FromRedis:%s\r\n", msg);
+    }
+
+    virtual void receiveRedisMessage(const void *data, uint32_t dataLen) override final
+    {
+        printf("FromRedis:");
+        const uint8_t *scan = (const uint8_t *)data;
+        for (uint32_t i = 0; i < dataLen; i++)
+        {
+            uint8_t c = scan[i];
+            if (c >= 32 && c <= 127)
+            {
+                printf("%c", c);
+            }
+            else
+            {
+                printf("$%02X", c);
+            }
+        }
+        printf("\r\n");
+    }
+
+    redisproxy::RedisProxy              *mRedisProxy{ nullptr };
+	wsocket::Wsocket		            *mServerSocket{ nullptr };
+	inputline::InputLine	            *mInputLine{ nullptr };
+	ClientConnectionVector	            mClients;
     keyvaluedatabase::KeyValueDatabase  *mDatabase{ nullptr };
 };
 
