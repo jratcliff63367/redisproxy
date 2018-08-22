@@ -21,6 +21,8 @@
 
 #define USE_MONITOR 1
 
+keyvaluedatabase::KeyValueDatabase::Provider gProvider = keyvaluedatabase::KeyValueDatabase::Provider::REDIS;
+
 typedef std::vector< std::string > StringVector;
 
 //#define PORT_NUMBER 6379    // Redis port number
@@ -35,7 +37,7 @@ public:
     SendFile(void)
     {
 #if !USE_MONITOR
-        mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::REDIS);
+        mDatabase = keyvaluedatabase::KeyValueDatabase::create(gProvider);
         mRedisProxy = redisproxy::RedisProxy::create(mDatabase);
 #else
         mRedisProxy = redisproxy::RedisProxy::createMonitor();
@@ -258,10 +260,13 @@ public:
 	{
 		mServerSocket = wsocket::Wsocket::create(SOCKET_SERVER, PORT_NUMBER);
 		mInputLine = inputline::InputLine::create();
-        mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::REDIS);
+        mDatabase = keyvaluedatabase::KeyValueDatabase::create(gProvider);
+#if USE_MONITOR
+        mRedisProxy = redisproxy::RedisProxy::createMonitor();
+#else
         mRedisProxy = redisproxy::RedisProxy::create(mDatabase);
-
-		printf("Simple Websockets chat server started.\r\n");
+#endif
+		printf("Redis proxy server started.\r\n");
 		printf("Type 'bye', 'quit', or 'exit' to stop the server.\r\n");
 		printf("Type anything else to send as a broadcast message to all current client connections.\r\n");
 	}

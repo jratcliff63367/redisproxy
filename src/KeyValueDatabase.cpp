@@ -1,4 +1,5 @@
 #include "KeyValueDatabase.h"
+#include "Wildcard.h"
 #include <mutex>
 #include <string>
 #include <stdlib.h>
@@ -389,6 +390,44 @@ namespace keyvaluedatabase
             (*callback)(true,added ? 1 : 0, userPointer);
         }
 
+        // Returns a list of keys which match this wildcard.  If 'match' is null, then it returns
+        // all keys in the database
+        virtual void scan(uint32_t scanIndex,uint32_t maxScan,const char *match,void *userPtr,KVD_scanCallback callback) override final
+        {
+            lock();
+            uint32_t scanCount = 0;
+            uint32_t index = 0;
+            wildcard::WildCard *wc = nullptr;
+            if (match)
+            {
+                wc = wildcard::WildCard::create(match);
+            }
+            bool finished = true;
+            for (auto &i : mDatabase)
+            {
+                bool isMatch = true;
+                if (wc)
+                {
+                    isMatch = wc->isMatch(i.first.c_str());
+                }
+                if (isMatch)
+                {
+                    if (index >= scanIndex)
+                    {
+                        if (scanCount >= maxScan)
+                        {
+                            finished = false;
+                            break;
+                        }
+                        scanCount++;
+                        (*callback)(userPtr, i.first.c_str(),index);
+                    }
+                    index++;
+                }
+            }
+            (*callback)(userPtr, nullptr,finished ? 0 : index); // notify call of end of scan operation
+            unlock();
+        }
 
         std::mutex      mMutex;
         KeyValueMap mDatabase;

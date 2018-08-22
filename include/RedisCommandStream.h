@@ -340,6 +340,8 @@ public:
     // Note, these values are only valid up until the time you call 'addStream' again
     virtual const char * getAttribute(uint32_t index, RedisAttribute &atr, uint32_t &dataLen) = 0;
 
+    virtual uint32_t getAttributeCount(void) const = 0;
+
     virtual const char *getCommandString(uint32_t &dataLen) = 0;
 
     // Convert this string into a command, 'NONE' if unknown

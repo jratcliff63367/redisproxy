@@ -10,7 +10,7 @@
 #define MAX_COMMAND_STRING (1024*4) // 4k
 #define MAX_TOTAL_MEMORY (1024*1024)*1024	// 1gb
 
-#define MAX_ARGS 32
+#define DEFAULT_ARG_COUNT 256   // Default number of arguments we will accumulate
 
 namespace rediscommandstream
 {
@@ -317,6 +317,8 @@ class RedisCommandStreamImpl : public RedisCommandStream
 public:
     RedisCommandStreamImpl(void)
     {
+        mMaxArgs = DEFAULT_ARG_COUNT;
+        mArguments = new RedisArgument[mMaxArgs];
         // Initialize the command lookup table
         for (auto &i : gCommandString)
         {
@@ -340,6 +342,7 @@ public:
 
     virtual ~RedisCommandStreamImpl(void)
     {
+        delete[]mArguments;
         if (mCommandBuffer)
         {
             mCommandBuffer->release();
@@ -366,19 +369,69 @@ public:
     {
         RedisCommand ret = RedisCommand::NONE;
 
-        if (*cmd == '*')
+        if (mExpectedArgumentLength)
+        {
+            uint32_t len = uint32_t(strlen(cmd));
+            if (mExpectedArgumentLength != len)
+            {
+                printf("Unexpected!  Length of the argument was not what we expected!\r\n");
+            }
+            else
+            {
+                if (mArgumentCount < mExpectedArgumentCount)
+                {
+                    if (mArgumentCount == mMaxArgs)
+                    {
+                        growArguments(); // increase the size of the arguments array!
+                    }
+                    RedisArgument &arg = mArguments[mArgumentCount];
+                    uint8_t *dest = mCommandBuffer->confirmCapacity(len + 1); // make sure there is room to store it!
+                                                                              // Todo..copy with escape char logic!
+                    memcpy(dest, cmd, len + 1); // copy the argument with zero byte terminator
+                    mCommandBuffer->addBuffer(nullptr, len + 1);
+                    arg.mData = dest;
+                    if (mArgumentCount == 0)
+                    {
+                        if (mArguments[0].mCommand == RedisCommand::RETURN_DATA)
+                        {
+
+                        }
+                        else
+                        {
+                            arg.mCommand = getCommand(cmd);
+                        }
+                    }
+                    else
+                    {
+                        arg.mAttribute = getAttribute(cmd);
+                        if (arg.mAttribute == RedisAttribute::NONE)
+                        {
+                            arg.mAttribute = RedisAttribute::ASCIIZ;
+                        }
+                    }
+                    arg.mDataLen = len;
+                    mArgumentCount++;
+
+                    if (mArgumentCount == mExpectedArgumentCount)
+                    {
+                        ret = mArguments[0].mCommand;
+                        if (ret == RedisCommand::NONE)
+                        {
+                            mArguments[0].mCommand = ret = RedisCommand::RETURN_DATA;
+                        }
+                        argc = mArgumentCount - 1; // 
+                    }
+                }
+            }
+            mExpectedArgumentLength = 0;
+        }
+        else if (*cmd == '*')
         {
             // specifies expected number of arguments total...
-            mExpectedArgumentCount = atoi(cmd+1); // expected number of arguments
-            mArgumentCount = 0;
+            mExpectedArgumentCount = atoi(cmd+1)+mArgumentCount; // expected number of arguments + the current argument count
             if (mExpectedArgumentCount == 0)
             {
                 printf("Invalid argument count! (%s)\r\n", cmd);
-                assert(0);
-            }
-            else if (mExpectedArgumentCount > MAX_ARGS)
-            {
-                printf("Exceeded maximum expected argument count (%d) found (%s)\n", MAX_ARGS, cmd);
                 assert(0);
             }
         }
@@ -421,98 +474,50 @@ public:
         {
             // if it doesn't begin with either an '*' or a '$' then it's an argument to process.
             uint32_t len = uint32_t(strlen(cmd));
-            if (mExpectedArgumentLength)
+            // Ok.. we need to parse the input into a series of arguments...
+            while (cmd && *cmd )
             {
-                if (mExpectedArgumentLength != len)
+                cmd = skipWhitespace(cmd);
+                if (*cmd == 34) // if it is a quoted string..
                 {
-                    printf("Unexpected!  Length of the argument was not what we expected!\r\n");
+                    assert(0); // not yet supported...
                 }
                 else
                 {
-                    if (mArgumentCount < mExpectedArgumentCount)
+                    const char *eos = cmd + 1;
+                    // Advance to either EOS or next whitespace
+                    while (!isWhitespace(*eos) && *eos )
                     {
-                        RedisArgument &arg = mArguments[mArgumentCount];
-                        uint8_t *dest = mCommandBuffer->confirmCapacity(len + 1); // make sure there is room to store it!
-                        // Todo..copy with escape char logic!
-                        memcpy(dest, cmd, len + 1); // copy the argument with zero byte terminator
-                        mCommandBuffer->addBuffer(nullptr, len + 1);
-                        arg.mData = dest;
-                        if (mArgumentCount == 0)
-                        {
-                            if (mArguments[0].mCommand == RedisCommand::RETURN_DATA)
-                            {
-
-                            }
-                            else
-                            {
-                                arg.mCommand = getCommand(cmd);
-                            }
-                        }
-                        else
-                        {
-                            arg.mAttribute = getAttribute(cmd);
-                            if (arg.mAttribute == RedisAttribute::NONE)
-                            {
-                                arg.mAttribute = RedisAttribute::ASCIIZ;
-                            }
-                        }
-                        arg.mDataLen = len;
-                        mArgumentCount++;
-                        if (mArgumentCount == mExpectedArgumentCount)
-                        {
-                            ret = mArguments[0].mCommand;
-                            argc = mArgumentCount-1; // 
-                        }
+                        eos++;
                     }
-                }
-            }
-            else
-            {
-                // Ok.. we need to parse the input into a series of arguments...
-                while (cmd && *cmd )
-                {
-                    cmd = skipWhitespace(cmd);
-                    if (*cmd == 34) // if it is a quoted string..
+                    uint32_t slen = uint32_t(eos - cmd); // length of the string we are adding...
+                    uint8_t *dest = mCommandBuffer->confirmCapacity(slen + 1);
+                    memcpy(dest, cmd, slen);
+                    mCommandBuffer->addBuffer(nullptr, len + 1);
+                    dest[slen] = 0;
+                    RedisArgument &arg = mArguments[mArgumentCount];
+                    arg.mData = dest;
+                    if (mArgumentCount == 0)
                     {
-                        assert(0); // not yet supported...
+                        arg.mCommand = getCommand((const char *)dest);
                     }
                     else
                     {
-                        const char *eos = cmd + 1;
-                        // Advance to either EOS or next whitespace
-                        while (!isWhitespace(*eos) && *eos )
+                        arg.mAttribute = getAttribute((const char *)dest);
+                        if (arg.mAttribute == RedisAttribute::NONE)
                         {
-                            eos++;
+                            arg.mAttribute = RedisAttribute::ASCIIZ;
                         }
-                        uint32_t slen = uint32_t(eos - cmd); // length of the string we are adding...
-                        uint8_t *dest = mCommandBuffer->confirmCapacity(slen + 1);
-                        memcpy(dest, cmd, slen);
-                        mCommandBuffer->addBuffer(nullptr, len + 1);
-                        dest[slen] = 0;
-                        RedisArgument &arg = mArguments[mArgumentCount];
-                        arg.mData = dest;
-                        if (mArgumentCount == 0)
-                        {
-                            arg.mCommand = getCommand((const char *)dest);
-                        }
-                        else
-                        {
-                            arg.mAttribute = getAttribute((const char *)dest);
-                            if (arg.mAttribute == RedisAttribute::NONE)
-                            {
-                                arg.mAttribute = RedisAttribute::ASCIIZ;
-                            }
-                        }
-                        arg.mDataLen = slen;
-                        mArgumentCount++;
-                        cmd = eos;
                     }
+                    arg.mDataLen = slen;
+                    mArgumentCount++;
+                    cmd = eos;
                 }
-                if (mArgumentCount)
-                {
-                    ret = mArguments[0].mCommand;
-                    argc = mArgumentCount - 1; // 
-                }
+            }
+            if (mArgumentCount)
+            {
+                ret = mArguments[0].mCommand;
+                argc = mArgumentCount - 1; // 
             }
         }
 
@@ -593,11 +598,35 @@ public:
         return ret;
     }
 
+    virtual uint32_t getAttributeCount(void) const override
+    {
+        uint32_t ret = 0;
+        if (mArgumentCount)
+        {
+            ret = mArgumentCount - 1;
+        }
+        return ret;
+    }
+
+    // Grow the argument buffer
+    void growArguments(void)
+    {
+        uint32_t newMaxArgs = mMaxArgs * 2;
+        RedisArgument *newArgs = new RedisArgument[newMaxArgs];
+        for (uint32_t i = 0; i < mArgumentCount; i++)
+        {
+            newArgs[i] = mArguments[i];
+        }
+        delete[]mArguments;
+        mArguments = newArgs;
+        mMaxArgs = newMaxArgs;
+    }
 
     uint32_t                    mExpectedArgumentCount{ 0 };    // Expected number of arguments
     uint32_t                    mArgumentCount{ 0 };            // current argument counter
     uint32_t                    mExpectedArgumentLength{ 0 };
-    RedisArgument               mArguments[MAX_ARGS];           // arguments we found
+    uint32_t                    mMaxArgs{ 0 };                  // Current maximum argument size
+    RedisArgument               *mArguments{ nullptr };         // arguments we found
 
     simplebuffer::SimpleBuffer	*mCommandBuffer{ nullptr };// Where pending responses are stored
     stringid::StringId          mCommandTable;				// The command table lookup

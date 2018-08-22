@@ -4,11 +4,17 @@
 #include "SimpleBuffer.h"
 #include "RedisCommandStream.h"
 #include "KeyValueDatabase.h"
+#include "ObjectPool.h"
+#include "wplatform.h"
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
+
+#include <vector>
+#include <string>
 
 #ifdef _MSC_VER
 #pragma warning(disable:4100 4456 4189)
@@ -19,14 +25,28 @@
 #define MAX_COMMAND_STRING (1024*4) // 4k
 #define MAX_TOTAL_MEMORY (1024*1024)*1024	// 1gb
 
+typedef std::vector< std::string > StringVector;
+
 namespace redisproxy
 {
+
+    class RedisProxyImpl;
+
+    class RedisScan
+    {
+    public:
+        RedisProxyImpl      *mThis;
+        StringVector        mResults;
+    };
+
+    typedef objectpool::ObjectPool< RedisScan > RedisScanPool;
 
     class RedisProxyImpl : public RedisProxy
     {
     public:
         RedisProxyImpl(keyvaluedatabase::KeyValueDatabase *database) : mDatabase(database)
         {
+            mScanPool.Initialise(32, true);
             if (mDatabase == nullptr)
             {
                 mDatabase = keyvaluedatabase::KeyValueDatabase::create(keyvaluedatabase::KeyValueDatabase::REDIS);
@@ -90,9 +110,7 @@ namespace redisproxy
                         RedisProxyImpl *r = (RedisProxyImpl *)userPointer;
                         if (listCount >= 0)
                         {
-                            char scratch[512];
-                            snprintf(scratch, 512, ":%d", listCount);
-                            r->addResponse(scratch);
+                            r->addResponse(":%d", listCount);
                         }
                         else
                         {
@@ -339,9 +357,27 @@ namespace redisproxy
 
         void badArgs(const char *cmd)
         {
+            addResponse("-ERR wrong number of arguments for '%s' command", cmd);
+        }
+
+        void scanResponse(RedisScan *rs, uint32_t index)
+        {
             char scratch[512];
-            snprintf(scratch, 512, "-ERR wrong number of arguments for '%s' command", cmd);
+            snprintf(scratch, 512, "%d", index);
+            uint32_t slen = uint32_t(strlen(scratch));
+            addResponse("*2");
+            addResponse("$%d", slen);
             addResponse(scratch);
+            uint32_t rcount = uint32_t(rs->mResults.size());
+            addResponse("*%d", rcount);
+            for (uint32_t i = 0; i < rcount; i++)
+            {
+                const char *str = rs->mResults[i].c_str();
+                uint32_t slen = uint32_t(strlen(str));
+                addResponse("$%d", slen);
+                addResponse("%s", str);
+            }
+            mScanPool.DeallocateObject(rs);
         }
 
         void scan(uint32_t argc)
@@ -354,28 +390,58 @@ namespace redisproxy
             {
                 rediscommandstream::RedisAttribute atr;
                 uint32_t dataLen;
-                const char *key = mCommandStream->getAttribute(0, atr, dataLen);
-                if (key && mDatabase)
+                const char *value = mCommandStream->getAttribute(0, atr, dataLen);
+                if ( value && mDatabase)
                 {
-                    const char *match = nullptr;
-                    const char *count = nullptr;
-                    if (argc >= 3)
+                    int32_t scanIndex = atoi(value);
+                    if (scanIndex < 0)
                     {
-                        const char *cmd = mCommandStream->getAttribute(1, atr, dataLen);
-                        if (atr == rediscommandstream::RedisAttribute::MATCH)
+                        addResponse("(error) ERR invalid cursor");
+                    }
+                    else
+                    {
+                        const char *match = nullptr;
+                        const char *count = nullptr;
+                        if (argc >= 3)
                         {
-                            match = mCommandStream->getAttribute(2, atr, dataLen);
-                        }
-                        if (argc >= 5)
-                        {
-                            cmd = mCommandStream->getAttribute(3, atr, dataLen);
-                            if (atr == rediscommandstream::RedisAttribute::COUNT)
+                            for (uint32_t i = 1; i < argc; i += 2)
                             {
-                                count = mCommandStream->getAttribute(4, atr, dataLen);
+                                const char *cmd = mCommandStream->getAttribute(i, atr, dataLen);
+                                if (atr == rediscommandstream::RedisAttribute::MATCH)
+                                {
+                                    match = mCommandStream->getAttribute(i + 1, atr, dataLen);
+                                }
+                                else if (atr == rediscommandstream::RedisAttribute::COUNT)
+                                {
+                                    count = mCommandStream->getAttribute(i+1, atr, dataLen);
+                                }
+                                else
+                                {
+                                    assert(0);
+                                }
                             }
                         }
+                        int32_t maxScan = 10; // if no count provided, default count is 10
+                        if (count)
+                        {
+                            maxScan = atoi(count);
+                        }
+                        RedisScan *rs = mScanPool.AllocateObject();
+                        rs->mThis = this;
+                        mDatabase->scan(scanIndex, maxScan, match, rs, [](void *userPtr, const char *key,uint32_t index)
+                        {
+                            RedisScan *rs = (RedisScan *)userPtr;
+                            RedisProxyImpl *thisPtr = rs->mThis;
+                            if (key == nullptr)
+                            {
+                                thisPtr->scanResponse(rs, index); // process response and free RedisScan object
+                            }
+                            else
+                            {
+                                rs->mResults.push_back(std::string(key));
+                            }
+                        });
                     }
-                    printf("%s : %s : %s\r\n", key, match, count);
                 }
             }
         }
@@ -398,9 +464,7 @@ namespace redisproxy
                         RedisProxyImpl *r = (RedisProxyImpl *)userData;
                         if (mem)
                         {
-                            char scratch[512];
-                            snprintf(scratch, 512, "$%d", dataLen);
-                            r->addResponse(scratch);
+                            r->addResponse("$%d", dataLen);
                             char *temp = (char *)malloc(dataLen + 1);
                             memcpy(temp, mem, dataLen);
                             temp[dataLen] = 0;
@@ -522,9 +586,7 @@ namespace redisproxy
                     RedisProxyImpl *r = (RedisProxyImpl *)userData;
                     if (isOk)
                     {
-                        char scratch[512];
-                        snprintf(scratch, 512, ":%d", newValue);
-                        r->addResponse(scratch);
+                        r->addResponse(":%d", newValue);
                     }
                     else
                     {
@@ -669,8 +731,14 @@ namespace redisproxy
             output.write(uint32_t(0)); // length of message ASCII message
         }
 
-        void addResponse(const char *str)
+        void addResponse(const char *fmt,...)
         {
+            char str[MAX_COMMAND_STRING];
+            va_list arg;
+            va_start(arg, fmt);
+            wplatform::stringFormatV(str, sizeof(str), fmt, arg);
+            va_end(arg);
+
             uint32_t slen = uint32_t(strlen(str));
             uint8_t *writeBuffer = mResponseBuffer->confirmCapacity(MAX_COMMAND_STRING); // make sure there enough room in the response buffer for both the JSON portion and the binary data blob
             assert(writeBuffer);
@@ -701,9 +769,7 @@ namespace redisproxy
 
         void processMulti(void)
         {
-            char scratch[512];
-            snprintf(scratch, 512, "*%d", mMultiCommandCount);
-            addResponse(scratch);
+            addResponse("*%d", mMultiCommandCount);
             uint32_t streamLen;
             const uint8_t *scan = mMultiBuffer->getData(streamLen);	// Get the raw stream of responses
             if (streamLen)
@@ -737,6 +803,7 @@ namespace redisproxy
         keyvaluedatabase::KeyValueDatabase      *mDatabase{ nullptr };
         uint32_t                                mMultiCommandCount{ 0 };
         simplebuffer::SimpleBuffer              *mMultiBuffer{ nullptr };
+        RedisScanPool                           mScanPool;
 #if USE_LOG_FILE
         FILE                                    *mLogFile{ nullptr };
 #endif

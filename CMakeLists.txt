@@ -85,10 +85,12 @@ set(Shared_SOURCES
 	include/InputLine.h
 	include/KeyValueDatabase.h
 	include/RedisCommandStream.h
+	include/Wildcard.h
 	src/InputLine.cpp
 	src/KeyValueDatabase.cpp
 	src/KeyValueDatabaseRedis.cpp
 	src/RedisCommandStream.cpp
+	src/Wildcard.cpp
 )
 
 

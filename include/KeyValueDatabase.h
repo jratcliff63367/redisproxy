@@ -15,6 +15,8 @@ namespace keyvaluedatabase
 typedef void (KVD_ABI *KVD_standardCallback)(bool ok, void* userPtr);
 typedef void (KVD_ABI *KVD_returnCodeCallback)(bool commandOk,int32_t returnCode, void* userPtr);
 typedef void (KVD_ABI *KVD_dataCallback)(void* userPtr,const void *data,uint32_t dataLen);
+// A 'nullptr' for 'key' means the scan operation is complete!
+typedef void (KVD_ABI *KVD_scanCallback)(void *userPtr, const char *key,uint32_t scanIndex);
 
 class KeyValueDatabase
 {
@@ -31,6 +33,10 @@ public:
 
     // Give up a timeslice to the database system
     virtual void pump(void) = 0;
+
+    // Returns a list of keys which match this wildcard.  If 'match' is null, then it returns
+    // all keys in the database
+    virtual void scan(uint32_t scanIndex,uint32_t maxScan,const char *match,void *userPtr, KVD_scanCallback callback) = 0;
 
     virtual void get(const char *key,void *userPointer, KVD_dataCallback callback) = 0;
 

@@ -4,6 +4,7 @@
 #include "RedisCommandStream.h"
 #include "SimpleBuffer.h"
 #include "MemoryStream.h"
+#include "Wildcard.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -15,8 +16,8 @@
 #pragma warning(disable:4100)
 #endif
 
-//#define REDIS_PORT_NUMBER 6379    // Redis port number
-#define REDIS_PORT_NUMBER 3010    // Redis port number; using the monitor intercept server
+#define REDIS_PORT_NUMBER 6379    // Redis port number
+//#define REDIS_PORT_NUMBER 3010    // Redis port number; using the monitor intercept server
 
 #define MAX_COMMAND_STRING (1024*4) // 4k
 #define MAX_TOTAL_MEMORY (1024*1024)*1024	// 1gb
@@ -37,6 +38,7 @@ namespace keyvaluedatabase
         WATCH,
         UNWATCH,
         INCREMENT,
+        SCAN,
     };
 
     class PendingRedisCommand
@@ -386,6 +388,30 @@ namespace keyvaluedatabase
                 (*callback)(prc.mUserPointer, c, dataLen);
             }
             break;
+            case RedisCommand::SCAN:
+                // Time to return the scan results!
+                {
+                    KVD_scanCallback callback = (KVD_scanCallback)prc.mCallback;
+                    uint32_t dataLen;
+                    const char *c = mCommandStream->getCommandString(dataLen);
+                    uint32_t index = 0;
+                    if (c)
+                    {
+                        index = atoi(c);
+                    }
+                    uint32_t attributeCount = mCommandStream->getAttributeCount();
+                    for (uint32_t i = 0; i < attributeCount; i++)
+                    {
+                        rediscommandstream::RedisAttribute atr;
+                        const char *result = mCommandStream->getAttribute(i, atr, dataLen);
+                        if (result)
+                        {
+                            (*callback)(prc.mUserPointer, result, 0);
+                        }
+                    }
+                    (*callback)(prc.mUserPointer, nullptr, index);
+                }
+                break;
             default:
                 assert(0); // not implemented yet
                 break;
@@ -485,6 +511,31 @@ namespace keyvaluedatabase
             prc.mCallback = callback;
             prc.mUserPointer = userPtr;
             mPendingRedisCommands.push(prc);
+        }
+
+        // Returns a list of keys which match this wildcard.  If 'match' is null, then it returns
+        // all keys in the database
+        virtual void scan(uint32_t cursorPosition,uint32_t maxScan,const char *_match,void *userPtr,KVD_scanCallback callback) override final
+        {
+            char scratch[512];
+            char count[512];
+            char match[512];
+
+            const char *countStr = "";
+            const char *matchStr = "";
+            if (maxScan > 0)
+            {
+                snprintf(count, 512, " count %d", maxScan);
+                countStr = count;
+            }
+            if (_match)
+            {
+                snprintf(match, 512, " match \"%s\"", _match);
+                matchStr = match;
+            }
+            snprintf(scratch, 512, "scan %d %s%s", cursorPosition, countStr, matchStr);
+            mSocketChat->sendText(scratch);
+            addPendingResponse(RedisCommand::SCAN, callback, userPtr);
         }
 
 
