@@ -22,6 +22,7 @@ namespace redisproxy
 {
 
     static FILE *gClientCommands = nullptr; 
+    static FILE *gRedisCommands = nullptr;
 
 
     typedef std::vector< std::string > StringVector;
@@ -36,14 +37,12 @@ namespace redisproxy
             {
                 gClientCommands = fopen("f:\\clientcommands.txt", "wb");
             }
-            static uint32_t gCount = 0;
-            gCount++;
-            char scratch[512];
-            snprintf(scratch, 512, "f:\\redismonitor%d.txt", gCount);
-            mFph = fopen(scratch, "wb");
+            if (gRedisCommands == nullptr )
+            {
+                gRedisCommands = fopen("f:\\rediscommands.txt", "wb");
+            }
 #endif
             mSocketChat = socketchat::SocketChat::create("localhost", REDIS_PORT_NUMBER);
-
             mResponseBuffer = simplebuffer::SimpleBuffer::create(MAX_COMMAND_STRING, MAX_TOTAL_MEMORY);
         }
 
@@ -53,10 +52,6 @@ namespace redisproxy
             if (mResponseBuffer)
             {
                 mResponseBuffer->release();
-            }
-            if (mFph)
-            {
-                fclose(mFph);
             }
         }
 
@@ -75,10 +70,10 @@ namespace redisproxy
                 fflush(gClientCommands);
             }
 
-            if (mFph)
+            if (gRedisCommands)
             {
-                fprintf(mFph, "[Client]%s\r\n", message);
-                fflush(mFph);
+                fprintf(gRedisCommands, "[Client]%s\r\n", message);
+                fflush(gRedisCommands);
             }
             if (mSocketChat)
             {
@@ -112,24 +107,24 @@ namespace redisproxy
             }
 
 
-            if (mFph)
+            if (gRedisCommands)
             {
-                fprintf(mFph, "[Client]");
+                fprintf(gRedisCommands, "[Client]");
                 const uint8_t *scan = (const uint8_t *)data;
                 for (uint32_t i = 0; i < dataLen; i++)
                 {
                     uint8_t c = scan[i];
                     if (c >= 32 && c <= 127)
                     {
-                        fprintf(mFph, "%c", c);
+                        fprintf(gRedisCommands, "%c", c);
                     }
                     else
                     {
-                        fprintf(mFph, "$%02X", c);
+                        fprintf(gRedisCommands, "$%02X", c);
                     }
                 }
-                fprintf(mFph, "\r\n");
-                fflush(mFph);
+                fprintf(gRedisCommands, "\r\n");
+                fflush(gRedisCommands);
             }
 
             if (mSocketChat)
@@ -169,10 +164,11 @@ namespace redisproxy
 
         virtual void receiveMessage(const char *data) override final
         {
-            if (mFph)
+            if (gRedisCommands)
             {
-                fprintf(mFph, "[Server]%s\r\n", data);
-                fflush(mFph);
+                fprintf(gRedisCommands, "[Server]%s\r\n", data);
+                fprintf(gRedisCommands, "\r\n");
+                fflush(gRedisCommands);
             }
             uint32_t slen = uint32_t(strlen(data));
             uint8_t *dest = mResponseBuffer->confirmCapacity(slen + sizeof(slen));
@@ -190,28 +186,28 @@ namespace redisproxy
             *dlen = dataLen;
             memcpy(dest + 4, data, dataLen);
             mResponseBuffer->addBuffer(nullptr, dataLen + sizeof(dataLen));
-            if (mFph)
+            if (gRedisCommands)
             {
-                fprintf(mFph, "[Server]");
+                fprintf(gRedisCommands, "[Server]");
                 const uint8_t *scan = (const uint8_t *)data;
                 for (uint32_t i = 0; i < dataLen; i++)
                 {
                     uint8_t c = scan[i];
                     if (c >= 32 && c < 127)
                     {
-                        fprintf(mFph, "%c", c);
+                        fprintf(gRedisCommands, "%c", c);
                     }
                     else
                     {
-                        fprintf(mFph, "$%02X", c);
+                        fprintf(gRedisCommands, "$%02X", c);
                     }
                 }
-                fprintf(mFph, "\r\n");
-                fflush(mFph);
+                fprintf(gRedisCommands, "\r\n");
+                fprintf(gRedisCommands, "\r\n");
+                fflush(gRedisCommands);
             }
         }
 
-        FILE                                    *mFph{ nullptr };
         socketchat::SocketChat                  *mSocketChat{ nullptr };
         simplebuffer::SimpleBuffer              *mResponseBuffer{ nullptr };
     };
